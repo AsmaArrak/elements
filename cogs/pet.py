@@ -188,6 +188,8 @@ class FeedView(discord.ui.View):
         self.original_interaction = original_interaction
         self.selected_pet: dict | None = pets[0] if len(pets) == 1 else None
         self.selected_food: str | None = None
+        self.selected_qty: int = 1
+        self._food_max: dict[str, int] = {i["item_key"]: i["quantity"] for i in food_inv}
 
         # Pet select (only show if more than 1 pet)
         if len(pets) > 1:
@@ -196,7 +198,10 @@ class FeedView(discord.ui.View):
         # Food select
         self.add_item(FoodSelect(food_inv))
 
-    @discord.ui.button(label="🍽️ Feed!", style=discord.ButtonStyle.success, row=2)
+        # Quantity select
+        self.add_item(QuantitySelect(row=2))
+
+    @discord.ui.button(label="🍽️ Feed!", style=discord.ButtonStyle.success, row=3)
     async def feed_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("Not your menu!", ephemeral=True)
@@ -208,22 +213,47 @@ class FeedView(discord.ui.View):
             await interaction.response.send_message("Please select a food item first.", ephemeral=True)
             return
 
+        qty = self.selected_qty
+        max_have = self._food_max.get(self.selected_food, 0)
+        if qty > max_have:
+            await interaction.response.send_message(
+                f"You only have {max_have}× of that food.", ephemeral=True
+            )
+            return
+
         self.stop()
         await interaction.response.defer()
 
-        embed, file = await do_feed(
-            self.selected_pet, self.selected_food,
-            self.user_id, interaction.channel
-        )
-        if file:
-            await interaction.followup.send(embed=embed, file=file)
-        else:
-            await interaction.followup.send(embed=embed)
+        # Feed multiple times, accumulate results
+        last_embed, last_file = None, None
+        total_xp = 0
+        total_stat = {}
+        evolved = False
 
-        # Edit the original selection message to show it's done
+        for _ in range(qty):
+            embed, file = await do_feed(
+                self.selected_pet, self.selected_food,
+                self.user_id, interaction.channel
+            )
+            last_embed, last_file = embed, file
+            # Refresh pet state for next iteration
+            async with aiosqlite.connect(db.DB_PATH) as conn:
+                self.selected_pet = await db.get_pet(conn, self.selected_pet["id"])
+            if self.selected_pet is None:
+                break
+
+        # Show final result
+        if qty > 1 and last_embed:
+            last_embed.set_footer(text=f"Fed ×{qty}")
+
+        if last_file:
+            await interaction.followup.send(embed=last_embed, file=last_file)
+        elif last_embed:
+            await interaction.followup.send(embed=last_embed)
+
         try:
             await self.original_interaction.edit_original_response(
-                embed=discord.Embed(description="✅ Fed!", color=0x2ECC71), view=None
+                embed=discord.Embed(description=f"✅ Fed ×{qty}!", color=0x2ECC71), view=None
             )
         except Exception:
             pass
@@ -269,6 +299,21 @@ class FoodSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         self.view.selected_food = self.values[0]
+        # Reset qty to 1 when food changes
+        self.view.selected_qty = 1
+        await interaction.response.defer()
+
+
+class QuantitySelect(discord.ui.Select):
+    def __init__(self, row: int = 2):
+        options = [
+            discord.SelectOption(label=f"Feed ×{n}", value=str(n), default=(n == 1))
+            for n in [1, 2, 3, 5, 10]
+        ]
+        super().__init__(placeholder="How many to feed? (default 1)", options=options, row=row)
+
+    async def callback(self, interaction: discord.Interaction):
+        self.view.selected_qty = int(self.values[0])
         await interaction.response.defer()
 
 

@@ -28,7 +28,7 @@ class Help(commands.Cog):
         embed.add_field(
             name="🍖 Feeding & Items",
             value=(
-                "`/feed` — Pick a pet and food from your inventory (egg needs **3 feedings** to hatch!)\n"
+                "`/feed` — Pick a pet, food, and quantity to feed (egg needs **3 feedings** to hatch!)\n"
                 "`/inventory` — View all your items\n"
                 "`/use <stone> <element>` — Use an evo stone to evolve\n"
                 "`/claim` — Grab a randomly spawned item from the channel\n"
@@ -64,7 +64,8 @@ class Help(commands.Cog):
             value=(
                 "`/setparty` — Set your battle party order\n"
                 "`/battle @user` — Challenge someone to PvP\n"
-                "`/battlelog` — View your recent battle history"
+                "`/battlelog` — View your recent battle history\n"
+                "*Each pet has 2 default attacks — learn up to 4 more from scrolls*"
             ),
             inline=False
         )
@@ -83,7 +84,7 @@ class Help(commands.Cog):
             name="🛒 Economy",
             value=(
                 "`/shop` — Browse the item shop\n"
-                "`/buy <item>` — Purchase an item\n"
+                "`/buy <item> [qty]` — Purchase an item (add quantity to buy in bulk)\n"
                 "`/sell <item> [qty]` — Sell items for coins\n"
                 "`/balance` — Check your coin balance\n"
                 "`/daily` — Claim daily bonus (100 coins + 30 XP)\n"

@@ -12,7 +12,7 @@ from config import (
     TYPE_ADVANTAGE, RARITY_EMOJIS, get_pet_image
 )
 from game.stats import effective_stats, hp_bar, calc_physical_damage, calc_magic_damage
-from game.skills import SKILLS
+from game.skills import SKILLS, DEFAULT_ATTACKS
 
 # In-memory battle states: channel_id -> BattleState
 active_battles: dict[int, "BattleState"] = {}
@@ -126,8 +126,27 @@ class BattleState:
                 continue  # already handled above
 
             if action["type"] == "attack":
-                move = action.get("move", "physical")
-                if move == "skill":
+                move = action.get("move", "default")
+
+                if move == "default":
+                    # Default attack — uses attacker's element for type advantage
+                    att_name = action.get("name", "Attack")
+                    att_type = action.get("attack_type", "physical")
+                    mult = action.get("mult", 1.1)
+                    if att_type == "physical":
+                        base = calc_physical_damage(attacker.stats, defender.stats)
+                    else:
+                        base, _ = calc_magic_damage(attacker.pet, defender.pet, attacker.stats, defender.stats)
+                    dmg = int(base * mult)
+                    if defender.element in TYPE_ADVANTAGE.get(attacker.element, []):
+                        dmg = int(dmg * 1.5)
+                        se_note = " ✨ *Super effective!*"
+                    else:
+                        se_note = ""
+                    defender.take_damage(dmg)
+                    logs.append(f"⚔️ **{attacker.name}** used **{att_name}** on **{defender.name}** for **{dmg}** damage!{se_note}")
+
+                elif move == "skill":
                     skill_key = action.get("skill_key")
                     skill = SKILLS.get(skill_key, {})
                     mult = skill.get("mult", 1.3)
@@ -138,7 +157,6 @@ class BattleState:
                     else:
                         base, _ = calc_magic_damage(attacker.pet, defender.pet, attacker.stats, defender.stats)
                         dmg = int(base * mult)
-                    # Type advantage for skill element
                     if defender.element in TYPE_ADVANTAGE.get(skill_elem, []):
                         dmg = int(dmg * 1.5)
                         se_note = " ✨ *Super effective!*"
@@ -147,16 +165,6 @@ class BattleState:
                     defender.take_damage(dmg)
                     r_emoji = RARITY_EMOJIS.get(skill.get("rarity", ""), "")
                     logs.append(f"{r_emoji} **{attacker.name}** used **{skill.get('name', skill_key)}** on **{defender.name}** for **{dmg}** damage!{se_note}")
-                elif move == "physical":
-                    dmg = calc_physical_damage(attacker.stats, defender.stats)
-                    defender.take_damage(dmg)
-                    logs.append(f"⚔️ **{attacker.name}** attacked **{defender.name}** for **{dmg}** damage!")
-                else:
-                    dmg, super_eff = calc_magic_damage(attacker.pet, defender.pet,
-                                                        attacker.stats, defender.stats)
-                    defender.take_damage(dmg)
-                    se_note = " ✨ *Super effective!*" if super_eff else ""
-                    logs.append(f"🌟 **{attacker.name}** used Magic on **{defender.name}** for **{dmg}** damage!{se_note}")
 
                 if not defender.alive:
                     logs.append(f"💀 **{defender.name}** fainted!")
@@ -308,14 +316,41 @@ class BattleView(discord.ui.View):
         if not self._is_participant(interaction.user):
             await interaction.response.send_message("You're not in this battle!", ephemeral=True)
             return
-        await self._set_action(interaction, {"type": "attack", "move": "physical"})
+        is_c = self._is_challenger(interaction.user)
+        current = self.state.c_current if is_c else self.state.o_current
+        defaults = DEFAULT_ATTACKS.get(current.element, [])
+        options = [
+            discord.SelectOption(
+                label=atk["name"],
+                value=atk["key"],
+                description=f"{'ATK' if atk['type'] == 'physical' else 'MGK'} · {atk['mult']}x · {atk['desc']}",
+                emoji="⚔️" if atk["type"] == "physical" else "✨"
+            )
+            for atk in defaults
+        ]
+        atk_select = discord.ui.Select(placeholder="Choose an attack...", options=options)
+        atk_map = {atk["key"]: atk for atk in defaults}
 
-    @discord.ui.button(label="✨ Magic", style=discord.ButtonStyle.primary, row=0)
-    async def magic(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not self._is_participant(interaction.user):
-            await interaction.response.send_message("You're not in this battle!", ephemeral=True)
-            return
-        await self._set_action(interaction, {"type": "attack", "move": "magic"})
+        async def atk_callback(inter: discord.Interaction):
+            if inter.user.id != interaction.user.id:
+                await inter.response.send_message("Not your menu!", ephemeral=True)
+                return
+            chosen = atk_map[atk_select.values[0]]
+            action = {
+                "type": "attack", "move": "default",
+                "name": chosen["name"], "attack_type": chosen["type"], "mult": chosen["mult"]
+            }
+            if is_c:
+                self.state.c_action = action
+            else:
+                self.state.o_action = action
+            await inter.response.send_message(f"**{chosen['name']}** queued!", ephemeral=True)
+            await maybe_resolve(self.state, inter)
+
+        atk_select.callback = atk_callback
+        sv = discord.ui.View(timeout=30)
+        sv.add_item(atk_select)
+        await interaction.response.send_message("Choose an attack:", view=sv, ephemeral=True)
 
     @discord.ui.button(label="📚 Skills", style=discord.ButtonStyle.primary, row=0)
     async def skill_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -391,11 +426,14 @@ class BattleView(discord.ui.View):
 
     async def on_timeout(self):
         state = self.state
-        # Auto-attack for those who didn't pick
+        # Auto-attack with first default move for those who didn't pick
+        def _default_action(element: str) -> dict:
+            atk = DEFAULT_ATTACKS.get(element, [{"name": "Tackle", "type": "physical", "mult": 1.1}])[0]
+            return {"type": "attack", "move": "default", "name": atk["name"], "attack_type": atk["type"], "mult": atk["mult"]}
         if not state.c_action:
-            state.c_action = {"type": "attack", "move": "physical"}
+            state.c_action = _default_action(state.c_current.element)
         if not state.o_action:
-            state.o_action = {"type": "attack", "move": "physical"}
+            state.o_action = _default_action(state.o_current.element)
         try:
             channel = self.c_user.guild.get_channel(state.channel_id) if hasattr(self.c_user, "guild") else None
             if channel:

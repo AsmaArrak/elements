@@ -128,36 +128,47 @@ class Economy(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="buy", description="Buy an item from the shop")
-    @app_commands.describe(item="Item name (e.g. apple, bread, fish)")
-    async def buy(self, interaction: discord.Interaction, item: str):
+    @app_commands.describe(
+        item="Item name (e.g. apple, bread, fish)",
+        quantity="How many to buy (default 1)"
+    )
+    async def buy(self, interaction: discord.Interaction, item: str, quantity: int = 1):
         item = item.lower().strip()
+        if quantity < 1:
+            await interaction.response.send_message("Quantity must be at least 1.", ephemeral=True)
+            return
+        if quantity > 99:
+            await interaction.response.send_message("You can buy at most 99 at a time.", ephemeral=True)
+            return
         if item not in SHOP_ITEMS:
             await interaction.response.send_message(
                 f"**{item}** isn't sold here. Use `/shop` to see what's available.", ephemeral=True
             )
             return
-        price = SHOP_ITEMS[item]["price"]
+        price_each = SHOP_ITEMS[item]["price"]
+        total = price_each * quantity
         async with aiosqlite.connect(db.DB_PATH) as conn:
             player = await db.get_player(conn, interaction.user.id)
             if not player:
                 await interaction.response.send_message("Use `/start` first.", ephemeral=True)
                 return
-            if player["coins"] < price:
+            if player["coins"] < total:
                 await interaction.response.send_message(
-                    f"Not enough coins! You have **{player['coins']}**, need **{price}**.",
+                    f"Not enough coins! You have **{player['coins']}**, need **{total}** ({quantity}× {price_each}).",
                     ephemeral=True
                 )
                 return
             await conn.execute(
-                "UPDATE players SET coins=coins-? WHERE user_id=?", (price, interaction.user.id)
+                "UPDATE players SET coins=coins-? WHERE user_id=?", (total, interaction.user.id)
             )
-            await db.add_item(conn, interaction.user.id, item, "food", 1)
+            await db.add_item(conn, interaction.user.id, item, "food", quantity)
             await conn.commit()
-            new_bal = player["coins"] - price
+            new_bal = player["coins"] - total
 
         display = FOOD_ITEMS[item]["display"]
+        qty_str = f"×{quantity} " if quantity > 1 else ""
         await interaction.response.send_message(
-            f"🛒 Bought **{display}** for **{price} coins**! Balance: **{new_bal} coins**."
+            f"🛒 Bought **{qty_str}{display}** for **{total} coins**! Balance: **{new_bal} coins**."
         )
 
     @app_commands.command(name="sell", description="Sell an item to the shop for coins")
