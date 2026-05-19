@@ -333,29 +333,6 @@ class Minigames(commands.Cog):
 
     @app_commands.command(name="trivia", description="Answer a trivia question to win coins")
     async def trivia(self, interaction: discord.Interaction):
-        async with aiosqlite.connect(db.DB_PATH) as conn:
-            await db.ensure_player(conn, interaction.user.id)
-            p = await db.get_player(conn, interaction.user.id)
-
-        last = p.get("last_trivia")
-        if last:
-            last_dt = datetime.fromisoformat(last)
-            diff = datetime.now(timezone.utc) - last_dt
-            cd = timedelta(minutes=TRIVIA_COOLDOWN_MINUTES)
-            if diff < cd:
-                remaining = int((cd - diff).total_seconds())
-                await interaction.response.send_message(
-                    f"⏳ Trivia resets in **{remaining}s**.", ephemeral=True
-                )
-                return
-
-        async with aiosqlite.connect(db.DB_PATH) as conn:
-            await conn.execute(
-                "UPDATE players SET last_trivia=? WHERE user_id=?",
-                (datetime.now(timezone.utc).isoformat(), interaction.user.id)
-            )
-            await conn.commit()
-
         question = random.choice(TRIVIA_QUESTIONS)
         labels = ["A", "B", "C", "D"]
         choices_text = "\n".join(
@@ -367,7 +344,7 @@ class Minigames(commands.Cog):
             description=f"**{question['q']}**\n\n{choices_text}",
             color=0x9B59B6
         )
-        embed.set_footer(text=f"First to click the right answer wins coins! • 20s • {TRIVIA_COOLDOWN_MINUTES}min cooldown")
+        embed.set_footer(text="First to click the right answer wins coins! • 20 seconds")
         view = TriviaView(question, interaction.channel_id)
         await interaction.response.send_message(embed=embed, view=view)
 

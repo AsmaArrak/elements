@@ -93,7 +93,7 @@ class Help(commands.Cog):
             value=(
                 "`/fish` — Cast a line for coins & items (10min cooldown)\n"
                 "`/dig` — Excavate for buried treasure (10min cooldown)\n"
-                "`/trivia` — Answer a question to win coins (2min cooldown)\n"
+                "`/trivia` — Answer a question to win coins\n"
                 "`/leaderboard` — See the top pets on the server"
             ),
             inline=False
