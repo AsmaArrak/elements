@@ -156,6 +156,12 @@ async def init_db():
             )
         """)
         await db.commit()
+        # Migration: add qty column to channel_drops for coins
+        try:
+            await db.execute("ALTER TABLE channel_drops ADD COLUMN qty INTEGER DEFAULT 1")
+            await db.commit()
+        except Exception:
+            pass
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 

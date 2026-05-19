@@ -136,13 +136,13 @@ class Drops(commands.Cog):
         else:
             msg = await channel.send(embed=embed)
 
-        # Record in DB
+        # Record in DB (store qty so coins are awarded correctly)
         async with aiosqlite.connect(db.DB_PATH) as conn:
             await conn.execute(
                 """INSERT INTO channel_drops
-                   (guild_id, channel_id, message_id, item_key, item_type, item_element, spawn_time, expires_at)
-                   VALUES (?,?,?,?,?,?,?,?)""",
-                (guild_id, channel_id, msg.id, item_key, item_type, element,
+                   (guild_id, channel_id, message_id, item_key, item_type, item_element, qty, spawn_time, expires_at)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (guild_id, channel_id, msg.id, item_key, item_type, element, qty,
                  db.now_iso(), expires.isoformat())
             )
             await conn.commit()
@@ -228,26 +228,26 @@ class Claim(commands.Cog):
             item_key = drop["item_key"]
             item_type = drop["item_type"]
             element = drop["item_element"]
+            qty = drop.get("qty") or 1
 
-            if item_key == "coins":
-                # qty stored differently - let's check
-                qty = 50  # default if not stored; in practice stored as item_key "coins" means a fixed amount
+            if item_type == "coins":
                 await conn.execute(
                     "UPDATE players SET coins=coins+? WHERE user_id=?",
                     (qty, interaction.user.id)
                 )
             else:
-                await db.add_item(conn, interaction.user.id, item_key, item_type, 1, element)
+                await db.add_item(conn, interaction.user.id, item_key, item_type, qty, element)
 
             await conn.commit()
 
         display = drop_display_name(item_key, item_type, element)
-        qty_text = ""
-        if item_key == "coins":
-            qty_text = " (50 coins added)"
+        if item_type == "coins":
+            reward_text = f"**{qty} coins** 💰"
+        else:
+            reward_text = f"**{display}**" + (f" ×{qty}" if qty > 1 else "")
 
         await interaction.response.send_message(
-            f"🎉 {interaction.user.mention} claimed **{display}**!{qty_text}\n"
+            f"🎉 {interaction.user.mention} snagged {reward_text}!\n"
             f"Check your `/inventory` to see it."
         )
 
