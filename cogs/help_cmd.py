@@ -18,16 +18,18 @@ class Help(commands.Cog):
             name="🚀 Getting Started",
             value=(
                 "`/start` — Browse all eggs and choose your element\n"
-                "`/profile` — View your active pet and stats\n"
+                "`/profile [@user]` — View your profile or another player's\n"
                 "`/pet` — See full detailed stats and caps\n"
-                "`/rename <name>` — Give your pet a custom name"
+                "`/rename <name>` — Give your active pet a custom name\n"
+                "`/activepet` — Switch which of your pets is active\n"
+                "`/restart` — Delete everything and start over"
             ),
             inline=False
         )
         embed.add_field(
             name="🍖 Feeding & Items",
             value=(
-                "`/feed <item>` — Feed your pet (egg needs **3 feedings** to hatch!)\n"
+                "`/feed` — Pick a pet and food from your inventory (egg needs **3 feedings** to hatch!)\n"
                 "`/inventory` — View all your items\n"
                 "`/use <stone> <element>` — Use an evo stone to evolve\n"
                 "`/claim` — Grab a randomly spawned item from the channel\n"
