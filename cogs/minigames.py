@@ -292,13 +292,12 @@ class Minigames(commands.Cog):
         view = TriviaView(question, interaction.channel_id)
         await interaction.response.send_message(embed=embed, view=view)
 
-    @app_commands.command(name="leaderboard", description="See the top players on this server")
+    @app_commands.command(name="leaderboard", description="See the top pets on this server ranked by level")
     async def leaderboard(self, interaction: discord.Interaction):
         if not interaction.guild:
             await interaction.response.send_message("Only works in a server.", ephemeral=True)
             return
 
-        # Get member IDs
         member_ids = [m.id for m in interaction.guild.members if not m.bot]
         if not member_ids:
             await interaction.response.send_message("No members found.", ephemeral=True)
@@ -307,33 +306,45 @@ class Minigames(commands.Cog):
         placeholders = ",".join("?" * len(member_ids))
         async with aiosqlite.connect(db.DB_PATH) as conn:
             async with conn.execute(
-                f"""SELECT p.player_id, p.level, p.element, p.variant, p.stage, p.nickname
+                f"""SELECT p.player_id, p.level, p.element, p.variant, p.stage, p.nickname, p.xp
                     FROM pets p
                     WHERE p.player_id IN ({placeholders})
-                    ORDER BY p.level DESC, p.stage DESC LIMIT 10""",
+                    AND p.stage > 0
+                    ORDER BY p.level DESC, p.stage DESC, p.xp DESC
+                    LIMIT 20""",
                 member_ids
             ) as cur:
                 rows = await cur.fetchall()
 
         if not rows:
-            await interaction.response.send_message("No pets on this server yet!", ephemeral=True)
+            await interaction.response.send_message("No hatched pets on this server yet!", ephemeral=True)
             return
 
-        embed = discord.Embed(title="🏆 Server Leaderboard — Top Pets", color=0xFFD700)
-        lines = []
-        medals = ["🥇", "🥈", "🥉"]
         from config import PET_NAMES, ELEMENT_EMOJIS, STAGE_NAMES
+
+        medals = {0: "🥇", 1: "🥈", 2: "🥉"}
+        stage_stars = {1: "", 2: "★", 3: "★★", 4: "⭐ MEGA"}
+
+        lines = []
         for i, row in enumerate(rows):
-            player_id, level, element, variant, stage, nickname = row
+            player_id, level, element, variant, stage, nickname, xp = row
             member = interaction.guild.get_member(player_id)
             member_name = member.display_name if member else f"User {player_id}"
             pet_name = nickname or PET_NAMES[element][variant][stage]
             emoji = ELEMENT_EMOJIS[element]
-            medal = medals[i] if i < 3 else f"**#{i+1}**"
+            rank = medals.get(i, f"`#{i+1}`")
+            stars = stage_stars.get(stage, "")
             lines.append(
-                f"{medal} **{pet_name}** {emoji} (Level {level} · {STAGE_NAMES[stage]}) — {member_name}"
+                f"{rank} **{pet_name}** {emoji} — Lv.**{level}** {stars}\n"
+                f"└ {STAGE_NAMES[stage]} · *{member_name}*"
             )
-        embed.description = "\n".join(lines)
+
+        embed = discord.Embed(
+            title="🏆 Pet Leaderboard",
+            description="\n".join(lines),
+            color=0xFFD700
+        )
+        embed.set_footer(text="Ranked by level — all pets count individually")
         await interaction.response.send_message(embed=embed)
 
 
