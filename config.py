@@ -212,7 +212,7 @@ ARMOR_BY_RARITY = {
 }
 
 RARITY_EMOJIS = {
-    "common": "⚪", "uncommon": "🟢", "rare": "🔵", "legendary": "🟡"
+    "common": "⚪", "uncommon": "🟢", "rare": "🟣", "legendary": "🟡"
 }
 
 # Passive XP per hour (background task)
