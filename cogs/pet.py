@@ -528,35 +528,6 @@ class Pet(commands.Cog):
             default = PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
             await interaction.response.send_message(f"Nickname cleared. Back to **{default}**.")
 
-    @app_commands.command(name="activepet", description="Switch which of your pets is the active one")
-    @app_commands.describe(slot="Pet slot number (1 = first pet, 2 = second, etc.)")
-    async def activepet(self, interaction: discord.Interaction, slot: int):
-        async with aiosqlite.connect(db.DB_PATH) as conn:
-            pets = await db.get_player_pets(conn, interaction.user.id)
-            if not pets:
-                await interaction.response.send_message("You have no pets.", ephemeral=True)
-                return
-            if slot < 1 or slot > len(pets):
-                await interaction.response.send_message(
-                    f"Invalid slot. You have {len(pets)} pet(s).", ephemeral=True
-                )
-                return
-            chosen = pets[slot - 1]
-            # Check it's not on expedition
-            exp = await db.get_active_expedition(conn, interaction.user.id)
-            if exp and exp["pet_id"] == chosen["id"]:
-                await interaction.response.send_message(
-                    "That pet is currently on an expedition!", ephemeral=True
-                )
-                return
-            await conn.execute(
-                "UPDATE players SET active_pet=? WHERE user_id=?",
-                (chosen["id"], interaction.user.id)
-            )
-            await conn.commit()
-
-        name = chosen.get("nickname") or PET_NAMES[chosen["element"]][chosen["variant"]][chosen["stage"]]
-        await interaction.response.send_message(f"Active pet switched to **{name}**! ✅")
 
 
 async def setup(bot: commands.Bot):

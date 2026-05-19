@@ -15,6 +15,76 @@ from game.loot import generate_expedition_loot
 VALID_DURATIONS = {1, 6, 12, 24}
 
 
+class ExpeditionPetSelect(discord.ui.View):
+    def __init__(self, user_id: int, pets: list[dict], duration: int):
+        super().__init__(timeout=60)
+        self.user_id = user_id
+        self.duration = duration
+        self.pets_by_id = {str(p["id"]): p for p in pets}
+        options = []
+        for p in pets:
+            name = p.get("nickname") or PET_NAMES[p["element"]][p["variant"]][p["stage"]]
+            emoji = ELEMENT_EMOJIS[p["element"]]
+            stage_label = STAGE_NAMES[p["stage"]]
+            options.append(discord.SelectOption(
+                label=name,
+                value=str(p["id"]),
+                description=f"Level {p['level']} · {stage_label} · Exploration {p['exploration']}/100",
+                emoji=emoji
+            ))
+        select = discord.ui.Select(placeholder="Choose a pet to send...", options=options)
+        select.callback = self._callback
+        self.add_item(select)
+
+    async def _callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your menu!", ephemeral=True)
+            return
+        pet = self.pets_by_id[interaction.data["values"][0]]
+        self.stop()
+        await interaction.response.defer()
+
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            await conn.execute(
+                "INSERT INTO expeditions(pet_id, player_id, start_time, duration_hrs) VALUES(?,?,?,?)",
+                (pet["id"], interaction.user.id, db.now_iso(), self.duration)
+            )
+            await conn.commit()
+
+        pet_name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
+        emoji = ELEMENT_EMOJIS[pet["element"]]
+        color = ELEMENT_COLORS[pet["element"]]
+        returns_at = datetime.now(timezone.utc) + timedelta(hours=self.duration)
+        ts = int(returns_at.timestamp())
+
+        embed = discord.Embed(
+            title="🗺️ Expedition Started!",
+            description=(
+                f"{emoji} **{pet_name}** has set out on a **{self.duration}-hour expedition**!\n\n"
+                f"Returns: <t:{ts}:R> (<t:{ts}:t>)\n\n"
+                f"Your pet is **locked** from battles until it returns.\n"
+                f"Exploration stat: **{pet['exploration']}/100**"
+                + (" — Mega Stone eligible! 🌟" if pet["exploration"] >= 100 else "")
+            ),
+            color=color
+        )
+        image_path = get_pet_image(pet["element"], pet["variant"], pet["stage"])
+        try:
+            file = discord.File(image_path, filename="pet.png")
+            embed.set_thumbnail(url="attachment://pet.png")
+            await interaction.followup.send(embed=embed, file=file)
+        except Exception:
+            await interaction.followup.send(embed=embed)
+
+        try:
+            await interaction.edit_original_response(
+                embed=discord.Embed(description=f"✅ {pet_name} sent on expedition!", color=0x2ECC71),
+                view=None
+            )
+        except Exception:
+            pass
+
+
 def item_display_name_simple(item_key: str, item_type: str, element: str = None) -> str:
     if item_type == "food":
         return FOOD_ITEMS.get(item_key, {}).get("display", item_key.title())
@@ -65,60 +135,70 @@ class Expedition(commands.Cog):
                 await interaction.response.send_message("Use `/start` first.", ephemeral=True)
                 return
 
-            # Check if already on expedition
-            existing = await db.get_active_expedition(conn, interaction.user.id)
-            if existing:
-                pet_on_exp = await db.get_pet(conn, existing["pet_id"])
-                pet_name = PET_NAMES[pet_on_exp["element"]][pet_on_exp["variant"]][pet_on_exp["stage"]]
-                await interaction.response.send_message(
-                    f"**{pet_name}** is already on an expedition! Use `/expedition status` to check.",
-                    ephemeral=True
-                )
-                return
+            all_pets = await db.get_player_pets(conn, interaction.user.id)
+            # Find which pets are already on expedition
+            async with conn.execute(
+                "SELECT pet_id FROM expeditions WHERE player_id=? AND returned=0",
+                (interaction.user.id,)
+            ) as cur:
+                on_exp_ids = {row[0] for row in await cur.fetchall()}
 
-            pet = await db.get_active_pet(conn, interaction.user.id)
-            if not pet:
-                await interaction.response.send_message("No active pet.", ephemeral=True)
-                return
-            if pet["stage"] == 0:
+            eligible = [
+                p for p in all_pets
+                if p["stage"] > 0 and p["id"] not in on_exp_ids
+            ]
+
+        if not eligible:
+            if any(p["stage"] == 0 for p in all_pets):
                 await interaction.response.send_message(
                     "Your egg can't go on expeditions! Feed it first.", ephemeral=True
                 )
-                return
+            else:
+                await interaction.response.send_message(
+                    "All your pets are already on expedition! Use `/expedition status` to check.",
+                    ephemeral=True
+                )
+            return
 
-            start = db.now_iso()
-            await conn.execute(
-                "INSERT INTO expeditions(pet_id, player_id, start_time, duration_hrs) VALUES(?,?,?,?)",
-                (pet["id"], interaction.user.id, start, duration)
+        if len(eligible) == 1:
+            pet = eligible[0]
+            async with aiosqlite.connect(db.DB_PATH) as conn:
+                await conn.execute(
+                    "INSERT INTO expeditions(pet_id, player_id, start_time, duration_hrs) VALUES(?,?,?,?)",
+                    (pet["id"], interaction.user.id, db.now_iso(), duration)
+                )
+                await conn.commit()
+
+            pet_name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
+            emoji = ELEMENT_EMOJIS[pet["element"]]
+            color = ELEMENT_COLORS[pet["element"]]
+            returns_at = datetime.now(timezone.utc) + timedelta(hours=duration)
+            ts = int(returns_at.timestamp())
+
+            embed = discord.Embed(
+                title="🗺️ Expedition Started!",
+                description=(
+                    f"{emoji} **{pet_name}** has set out on a **{duration}-hour expedition**!\n\n"
+                    f"Returns: <t:{ts}:R> (<t:{ts}:t>)\n\n"
+                    f"Your pet is **locked** from battles until it returns.\n"
+                    f"Exploration stat: **{pet['exploration']}/100**"
+                    + (" — Mega Stone eligible! 🌟" if pet["exploration"] >= 100 else "")
+                ),
+                color=color
             )
-            await conn.commit()
-
-        pet_name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
-        emoji = ELEMENT_EMOJIS[pet["element"]]
-        color = ELEMENT_COLORS[pet["element"]]
-
-        returns_at = datetime.now(timezone.utc) + timedelta(hours=duration)
-        ts = int(returns_at.timestamp())
-
-        embed = discord.Embed(
-            title=f"🗺️ Expedition Started!",
-            description=(
-                f"{emoji} **{pet_name}** has set out on a **{duration}-hour expedition**!\n\n"
-                f"Returns: <t:{ts}:R> (<t:{ts}:t>)\n\n"
-                f"Your pet is **locked** from battles until it returns.\n"
-                f"Exploration stat: **{pet['exploration']}/100**"
-                + (" — Mega Stone eligible! 🌟" if pet["exploration"] >= 100 else "")
-            ),
-            color=color
-        )
-
-        image_path = get_pet_image(pet["element"], pet["variant"], pet["stage"])
-        try:
-            file = discord.File(image_path, filename="pet.png")
-            embed.set_thumbnail(url="attachment://pet.png")
-            await interaction.response.send_message(embed=embed, file=file)
-        except Exception:
-            await interaction.response.send_message(embed=embed)
+            image_path = get_pet_image(pet["element"], pet["variant"], pet["stage"])
+            try:
+                file = discord.File(image_path, filename="pet.png")
+                embed.set_thumbnail(url="attachment://pet.png")
+                await interaction.response.send_message(embed=embed, file=file)
+            except Exception:
+                await interaction.response.send_message(embed=embed)
+        else:
+            view = ExpeditionPetSelect(interaction.user.id, eligible, duration)
+            await interaction.response.send_message(
+                f"Which pet do you want to send on a **{duration}-hour expedition**?",
+                view=view, ephemeral=True
+            )
 
     async def _status(self, interaction: discord.Interaction):
         async with aiosqlite.connect(db.DB_PATH) as conn:

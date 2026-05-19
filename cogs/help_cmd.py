@@ -21,7 +21,6 @@ class Help(commands.Cog):
                 "`/profile [@user]` — View your profile or another player's\n"
                 "`/pet` — See full detailed stats and caps\n"
                 "`/rename <name>` — Give your active pet a custom name\n"
-                "`/activepet` — Switch which of your pets is active\n"
                 "`/restart` — Delete everything and start over"
             ),
             inline=False

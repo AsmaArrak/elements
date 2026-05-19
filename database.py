@@ -136,10 +136,14 @@ async def get_pet(db: aiosqlite.Connection, pet_id: int) -> dict | None:
     return None
 
 async def get_active_pet(db: aiosqlite.Connection, user_id: int) -> dict | None:
-    p = await get_player(db, user_id)
-    if not p or not p["active_pet"]:
-        return None
-    return await get_pet(db, p["active_pet"])
+    async with db.execute(
+        "SELECT * FROM pets WHERE player_id=? ORDER BY id LIMIT 1", (user_id,)
+    ) as cur:
+        row = await cur.fetchone()
+        if row:
+            cols = [d[0] for d in cur.description]
+            return dict(zip(cols, row))
+    return None
 
 async def get_player_pets(db: aiosqlite.Connection, user_id: int) -> list[dict]:
     async with db.execute(
