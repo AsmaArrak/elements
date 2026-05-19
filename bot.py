@@ -14,6 +14,7 @@ GUILD_ID = os.getenv("GUILD_ID", "").strip()
 COGS = [
     "cogs.setup",
     "cogs.help_cmd",
+    "cogs.admin",
     "cogs.start",
     "cogs.pet",
     "cogs.inventory",
