@@ -221,6 +221,47 @@ class Admin(commands.Cog):
         embed.add_field(name="Highest Level Pet", value=str(max_level), inline=True)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+    # ── /admin backup ─────────────────────────────────────────────────────────
+
+    @admin.command(name="backup", description="DM yourself the database file for safekeeping")
+    async def backup(self, interaction: discord.Interaction):
+        if not await self._check(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            file = discord.File(db.DB_PATH, filename="elementals_backup.db")
+            await interaction.user.send(
+                "📦 **Elementals DB Backup**\nKeep this file safe. Use `/admin restore` with this file after a redeploy.",
+                file=file
+            )
+            await interaction.followup.send("✅ Backup sent to your DMs!", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.followup.send("❌ Couldn't DM you. Enable DMs from server members.", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+    # ── /admin restore ────────────────────────────────────────────────────────
+
+    @admin.command(name="restore", description="Restore the database from a backup file")
+    @app_commands.describe(file="The elementals_backup.db file to restore")
+    async def restore(self, interaction: discord.Interaction, file: discord.Attachment):
+        if not await self._check(interaction):
+            return
+        if not file.filename.endswith(".db"):
+            await interaction.response.send_message("❌ Please attach a .db file.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            data = await file.read()
+            with open(db.DB_PATH, "wb") as f:
+                f.write(data)
+            await interaction.followup.send(
+                f"✅ Database restored! ({len(data):,} bytes)\nRestart the bot for changes to take full effect.",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Admin(bot))
