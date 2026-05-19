@@ -201,22 +201,26 @@ class Claim(commands.Cog):
         async with aiosqlite.connect(db.DB_PATH) as conn:
             player = await db.ensure_player(conn, interaction.user.id)
 
-            # Find the most recent unclaimed, unexpired drop in this channel
+            # Find the most recent unclaimed, unexpired drop anywhere in this guild
             async with conn.execute(
                 """SELECT * FROM channel_drops
-                   WHERE guild_id=? AND channel_id=? AND claimed_by IS NULL AND expires_at > ?
+                   WHERE guild_id=? AND claimed_by IS NULL AND expires_at > ?
                    ORDER BY spawn_time DESC LIMIT 1""",
-                (interaction.guild.id, interaction.channel_id, now)
+                (interaction.guild.id, now)
             ) as cur:
                 row = await cur.fetchone()
                 if not row:
                     await interaction.response.send_message(
-                        "No unclaimed drop here right now! Watch for the next one.",
+                        "No active drops right now! Watch the drops channel for the next one.",
                         ephemeral=True
                     )
                     return
                 cols = [d[0] for d in cur.description]
                 drop = dict(zip(cols, row))
+
+            # If the drop is in a different channel, tell the user (but still let them claim)
+            drop_channel_id = drop.get("channel_id")
+            wrong_channel = drop_channel_id and drop_channel_id != interaction.channel_id
 
             # Mark as claimed
             await conn.execute(
@@ -246,8 +250,14 @@ class Claim(commands.Cog):
         else:
             reward_text = f"**{display}**" + (f" ×{qty}" if qty > 1 else "")
 
+        channel_note = ""
+        if wrong_channel and drop_channel_id:
+            ch = interaction.guild.get_channel(drop_channel_id) if interaction.guild else None
+            if ch:
+                channel_note = f" *(drop was in {ch.mention})*"
+
         await interaction.response.send_message(
-            f"🎉 {interaction.user.mention} snagged {reward_text}!\n"
+            f"🎉 {interaction.user.mention} snagged {reward_text}!{channel_note}\n"
             f"Check your `/inventory` to see it."
         )
 
