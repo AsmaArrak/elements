@@ -48,6 +48,7 @@ class Help(commands.Cog):
         embed.add_field(
             name="⚔️ Battle",
             value=(
+                "`/setparty` — Set the order of your pets for battle\n"
                 "`/battle @user` — Challenge someone to PvP\n"
                 "`/battlelog` — View your recent battle history"
             ),

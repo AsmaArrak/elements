@@ -103,6 +103,12 @@ async def init_db():
             );
         """)
         await db.commit()
+        # Migration: add party_slot column if it doesn't exist yet
+        try:
+            await db.execute("ALTER TABLE pets ADD COLUMN party_slot INTEGER DEFAULT NULL")
+            await db.commit()
+        except Exception:
+            pass
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -137,7 +143,8 @@ async def get_pet(db: aiosqlite.Connection, pet_id: int) -> dict | None:
 
 async def get_active_pet(db: aiosqlite.Connection, user_id: int) -> dict | None:
     async with db.execute(
-        "SELECT * FROM pets WHERE player_id=? ORDER BY id LIMIT 1", (user_id,)
+        "SELECT * FROM pets WHERE player_id=? ORDER BY COALESCE(party_slot, 9999), id LIMIT 1",
+        (user_id,)
     ) as cur:
         row = await cur.fetchone()
         if row:
@@ -147,7 +154,8 @@ async def get_active_pet(db: aiosqlite.Connection, user_id: int) -> dict | None:
 
 async def get_player_pets(db: aiosqlite.Connection, user_id: int) -> list[dict]:
     async with db.execute(
-        "SELECT * FROM pets WHERE player_id=? ORDER BY id", (user_id,)
+        "SELECT * FROM pets WHERE player_id=? ORDER BY COALESCE(party_slot, 9999), id",
+        (user_id,)
     ) as cur:
         rows = await cur.fetchall()
         cols = [d[0] for d in cur.description]

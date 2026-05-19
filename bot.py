@@ -23,6 +23,7 @@ COGS = [
     "cogs.economy",
     "cogs.drops",
     "cogs.minigames",
+    "cogs.party",
 ]
 
 
