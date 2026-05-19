@@ -85,10 +85,30 @@ class EggBrowserView(discord.ui.View):
 
     async def on_element_chosen(self, interaction: discord.Interaction, element: str):
         self.stop()
-        variant = random.randint(1, 2)
 
         async with aiosqlite.connect(db.DB_PATH) as conn:
             await db.ensure_player(conn, interaction.user.id)
+
+            # Pity system: if last pick of this element was variant X, guarantee the other
+            async with conn.execute(
+                "SELECT last_variant FROM element_pity WHERE player_id=? AND element=?",
+                (interaction.user.id, element)
+            ) as cur:
+                pity_row = await cur.fetchone()
+
+            if pity_row:
+                variant = 3 - pity_row[0]  # 1→2, 2→1
+                await conn.execute(
+                    "DELETE FROM element_pity WHERE player_id=? AND element=?",
+                    (interaction.user.id, element)
+                )
+            else:
+                variant = random.randint(1, 2)
+                await conn.execute(
+                    "INSERT OR REPLACE INTO element_pity(player_id, element, last_variant) VALUES(?,?,?)",
+                    (interaction.user.id, element, variant)
+                )
+
             bases = calc_base_stats(element, 0)
             await conn.execute(
                 """INSERT INTO pets
@@ -100,12 +120,6 @@ class EggBrowserView(discord.ui.View):
                  bases["spd"], bases["mgk"], bases["res"])
             )
             await conn.commit()
-            async with conn.execute("SELECT last_insert_rowid()") as cur:
-                pet_id = (await cur.fetchone())[0]
-            await conn.execute(
-                "UPDATE players SET active_pet=? WHERE user_id=?",
-                (pet_id, interaction.user.id)
-            )
             # Give 1 starting food item
             starting_food = random.choice(["apple", "bread", "carrot", "cheese", "grape"])
             await db.add_item(conn, interaction.user.id, starting_food, "food", 1)

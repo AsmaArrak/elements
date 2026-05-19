@@ -109,6 +109,16 @@ async def init_db():
             await db.commit()
         except Exception:
             pass
+        # Pity table: tracks last variant received per element per player
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS element_pity (
+                player_id    INTEGER NOT NULL,
+                element      TEXT NOT NULL,
+                last_variant INTEGER NOT NULL,
+                PRIMARY KEY (player_id, element)
+            )
+        """)
+        await db.commit()
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
