@@ -45,6 +45,7 @@ class Help(commands.Cog):
                 "`/expedition 6h` — Best loot, highest rarity chance\n"
                 "`/expedition status` — Check all active expeditions\n"
                 "`/expedition cancel` — Recall a pet early *(no loot)*\n"
+                "`/expedition accelerate` — Use an accelerator to cut expedition time ⏩\n"
                 "`/collect` — Collect your pet and loot when it returns"
             ),
             inline=False
@@ -94,8 +95,8 @@ class Help(commands.Cog):
         embed.add_field(
             name="🎮 Minigames",
             value=(
-                "`/fish` — Cast a line for coins & items (10min cooldown)\n"
-                "`/dig` — Excavate for buried treasure (10min cooldown)\n"
+                "`/fish` — Cast a line for coins, items & accelerators (10min cooldown)\n"
+                "`/dig` — Excavate for buried treasure & accelerators (10min cooldown)\n"
                 "`/trivia` — Answer a question to win coins\n"
                 "`/leaderboard` — See the top pets on the server"
             ),

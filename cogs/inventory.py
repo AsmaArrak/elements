@@ -6,7 +6,7 @@ import aiosqlite
 import database as db
 from config import (
     ELEMENT_DISPLAY, ELEMENT_EMOJIS, ELEMENT_COLORS, PET_NAMES, FOOD_ITEMS,
-    STAT_ITEMS, get_stone_image
+    STAT_ITEMS, ACCELERATORS, get_stone_image
 )
 from game.evolution import evolve_pet, can_evolve_to
 
@@ -16,6 +16,8 @@ def item_display_name(item_key: str, item_type: str, element: str = None) -> str
         return FOOD_ITEMS.get(item_key, {}).get("display", item_key.title())
     if item_type == "stat_item":
         return STAT_ITEMS.get(item_key, {}).get("display", item_key.replace("_", " ").title())
+    if item_type == "accelerator":
+        return ACCELERATORS.get(item_key, {}).get("display", item_key.replace("_", " ").title())
     if item_type == "evo_stone":
         prefix = ELEMENT_DISPLAY.get(element, element.title()) + " " if element else ""
         stone_name = "Uncommon Evo Stone" if item_key == "evo_stone_uncommon" else "Rare Evo Stone"
@@ -58,15 +60,16 @@ class Inventory(commands.Cog):
 
         # Group by type
         groups: dict[str, list[str]] = {}
-        type_order = ["food", "stat_item", "evo_stone", "mega_stone", "egg", "scroll", "coins"]
+        type_order = ["food", "stat_item", "accelerator", "evo_stone", "mega_stone", "egg", "scroll", "coins"]
         type_labels = {
-            "food":      "🍖 Food",
-            "stat_item": "📦 Stat Items",
-            "evo_stone": "💠 Evolution Stones",
-            "mega_stone": "⭐ Mega Stones",
-            "egg":       "🥚 Eggs",
-            "scroll":    "📜 Skill Scrolls",
-            "coins":     "💰 Coins",
+            "food":        "🍖 Food",
+            "stat_item":   "📦 Stat Items",
+            "accelerator": "⏩ Expedition Accelerators",
+            "evo_stone":   "💠 Evolution Stones",
+            "mega_stone":  "⭐ Mega Stones",
+            "egg":         "🥚 Eggs",
+            "scroll":      "📜 Skill Scrolls",
+            "coins":       "💰 Coins",
         }
 
         from config import RARITY_EMOJIS
@@ -94,6 +97,10 @@ class Inventory(commands.Cog):
                 r_emoji = RARITY_EMOJIS.get(rarity, "⚪")
                 elem = skill.get("element", "").title()
                 groups[t].append(f"{r_emoji} **{skill.get('name', name)} Scroll** ×{item['quantity']} — *{elem} · {skill.get('desc', '')}*")
+            elif t == "accelerator":
+                acc = ACCELERATORS.get(item["item_key"], {})
+                desc = acc.get("desc", "")
+                groups[t].append(f"**{name}** ×{item['quantity']} — *{desc}*")
             elif t == "evo_stone":
                 stone_name = "Uncommon Evo Stone (Evo 1→2)" if item["item_key"] == "evo_stone_uncommon" else "Rare Evo Stone (Evo 2→3)"
                 elem = ELEMENT_DISPLAY.get(item["element"], "") if item["element"] else ""

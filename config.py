@@ -237,6 +237,13 @@ FISH_COOLDOWN_MINUTES = 10
 DIG_COOLDOWN_MINUTES = 10
 TRIVIA_COOLDOWN_MINUTES = 2
 
+# Expedition accelerators — reduce remaining expedition time
+ACCELERATORS = {
+    "acc_small":  {"display": "Small Accelerator ⏩",  "minutes": 15,  "desc": "Cuts 15 min off an expedition"},
+    "acc_medium": {"display": "Medium Accelerator ⏩⏩", "minutes": 30, "desc": "Cuts 30 min off an expedition"},
+    "acc_large":  {"display": "Large Accelerator ⏩⏩⏩", "minutes": 60, "desc": "Cuts 1 hour off an expedition"},
+}
+
 DROP_INTERVAL_MIN = 20   # minutes between channel drops
 DROP_INTERVAL_MAX = 60
 DROP_EXPIRY_MINUTES = 12

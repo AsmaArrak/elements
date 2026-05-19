@@ -6,7 +6,7 @@ import random
 from datetime import datetime, timezone, timedelta
 
 import database as db
-from config import FOOD_ITEMS, STAT_ITEMS, FISH_COOLDOWN_MINUTES, DIG_COOLDOWN_MINUTES, TRIVIA_COOLDOWN_MINUTES
+from config import FOOD_ITEMS, STAT_ITEMS, ACCELERATORS, FISH_COOLDOWN_MINUTES, DIG_COOLDOWN_MINUTES, TRIVIA_COOLDOWN_MINUTES
 
 
 TRIVIA_QUESTIONS = [
@@ -196,12 +196,24 @@ class Minigames(commands.Cog):
                     "UPDATE players SET coins=coins+?, last_fish=? WHERE user_id=?",
                     (coins, db.now_iso(), interaction.user.id)
                 )
-            elif roll < 0.93:
+            elif roll < 0.88:
                 # Rare: food item
                 food = random.choice(["fish", "apple", "bread", "grape"])
                 await db.add_item(conn, interaction.user.id, food, "food", 1)
                 food_display = FOOD_ITEMS[food]["display"]
                 result_text = f"🎣 You reeled in a **{food_display}**! Added to inventory."
+                await conn.execute(
+                    "UPDATE players SET last_fish=? WHERE user_id=?",
+                    (db.now_iso(), interaction.user.id)
+                )
+            elif roll < 0.95:
+                # Uncommon find: accelerator
+                acc_key = random.choices(
+                    ["acc_small", "acc_medium", "acc_large"], weights=[60, 30, 10], k=1
+                )[0]
+                await db.add_item(conn, interaction.user.id, acc_key, "accelerator", 1)
+                acc_display = ACCELERATORS[acc_key]["display"]
+                result_text = f"⏩ **Strange find!** Your hook caught a **{acc_display}**! Use it to speed up an expedition."
                 await conn.execute(
                     "UPDATE players SET last_fish=? WHERE user_id=?",
                     (db.now_iso(), interaction.user.id)
@@ -277,7 +289,7 @@ class Minigames(commands.Cog):
                     "UPDATE players SET coins=coins+?, last_dig=? WHERE user_id=?",
                     (coins, db.now_iso(), interaction.user.id)
                 )
-            elif roll < 0.82:
+            elif roll < 0.75:
                 # Food
                 food = random.choice(["apple", "bread", "carrot", "cheese", "grape"])
                 await db.add_item(conn, interaction.user.id, food, "food", 1)
@@ -287,7 +299,19 @@ class Minigames(commands.Cog):
                     "UPDATE players SET last_dig=? WHERE user_id=?",
                     (db.now_iso(), interaction.user.id)
                 )
-            elif roll < 0.94:
+            elif roll < 0.87:
+                # Accelerator
+                acc_key = random.choices(
+                    ["acc_small", "acc_medium", "acc_large"], weights=[55, 35, 10], k=1
+                )[0]
+                await db.add_item(conn, interaction.user.id, acc_key, "accelerator", 1)
+                acc_display = ACCELERATORS[acc_key]["display"]
+                result_text = f"⏩ **Buried treasure!** You dug up a **{acc_display}**! Use it to speed up an expedition."
+                await conn.execute(
+                    "UPDATE players SET last_dig=? WHERE user_id=?",
+                    (db.now_iso(), interaction.user.id)
+                )
+            elif roll < 0.95:
                 # Stat item
                 stat_item = random.choice(list(STAT_ITEMS.keys()))
                 await db.add_item(conn, interaction.user.id, stat_item, "stat_item", 1)

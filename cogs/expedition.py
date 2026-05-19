@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 import database as db
 from config import (
     ELEMENT_DISPLAY, ELEMENT_EMOJIS, ELEMENT_COLORS, PET_NAMES, STAGE_NAMES,
-    FOOD_ITEMS, STAT_ITEMS, EXPEDITION_XP, EXPLORATION_GAIN, get_pet_image
+    FOOD_ITEMS, STAT_ITEMS, ACCELERATORS, EXPEDITION_XP, EXPLORATION_GAIN, get_pet_image
 )
 from game.loot import generate_expedition_loot, generate_armor_drop, generate_scroll_drop
 
@@ -227,6 +227,135 @@ class CancelSelectView(discord.ui.View):
         )
 
 
+# ── Accelerate UI ─────────────────────────────────────────────────────────────
+
+class AccelerateView(discord.ui.View):
+    def __init__(self, user_id: int, exp_pet_pairs: list[tuple[dict, dict]], acc_inv: list[dict]):
+        super().__init__(timeout=60)
+        self.user_id = user_id
+        self.pairs_by_exp = {str(exp["id"]): (exp, pet) for exp, pet in exp_pet_pairs}
+        self.acc_inv = acc_inv
+        self.selected_exp_id: str | None = None if len(exp_pet_pairs) > 1 else str(exp_pet_pairs[0][0]["id"])
+        self.selected_acc: str | None = None
+
+        # Expedition select (only if multiple)
+        if len(exp_pet_pairs) > 1:
+            exp_options = []
+            for exp, pet in exp_pet_pairs:
+                name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
+                emoji = ELEMENT_EMOJIS[pet["element"]]
+                end = datetime.fromisoformat(exp["start_time"]) + timedelta(hours=exp["duration_hrs"])
+                remaining = end - datetime.now(timezone.utc)
+                mins_left = max(0, int(remaining.total_seconds() // 60))
+                exp_options.append(discord.SelectOption(
+                    label=name,
+                    value=str(exp["id"]),
+                    description=f"{fmt_dur(exp['duration_hrs'])} · {mins_left}min remaining",
+                    emoji=emoji
+                ))
+            exp_select = discord.ui.Select(placeholder="Choose expedition...", options=exp_options, row=0)
+            exp_select.callback = self._exp_selected
+            self.add_item(exp_select)
+
+        # Accelerator select
+        acc_options = []
+        for a in acc_inv:
+            info = ACCELERATORS.get(a["key"], {})
+            acc_options.append(discord.SelectOption(
+                label=info.get("display", a["key"]),
+                value=a["key"],
+                description=f"×{a['qty']} in bag · {info.get('desc', '')}",
+            ))
+        acc_select = discord.ui.Select(
+            placeholder="Choose accelerator...", options=acc_options,
+            row=1 if len(exp_pet_pairs) > 1 else 0
+        )
+        acc_select.callback = self._acc_selected
+        self.add_item(acc_select)
+
+    async def _exp_selected(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your menu!", ephemeral=True)
+            return
+        self.selected_exp_id = interaction.data["values"][0]
+        await interaction.response.defer()
+
+    async def _acc_selected(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your menu!", ephemeral=True)
+            return
+        self.selected_acc = interaction.data["values"][0]
+        await interaction.response.defer()
+
+    @discord.ui.button(label="⏩ Apply!", style=discord.ButtonStyle.success, row=2)
+    async def apply_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your menu!", ephemeral=True)
+            return
+        if not self.selected_exp_id:
+            await interaction.response.send_message("Select an expedition first.", ephemeral=True)
+            return
+        if not self.selected_acc:
+            await interaction.response.send_message("Select an accelerator first.", ephemeral=True)
+            return
+
+        self.stop()
+        exp, pet = self.pairs_by_exp[self.selected_exp_id]
+        acc_info = ACCELERATORS[self.selected_acc]
+        shorten_mins = acc_info["minutes"]
+
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            # Verify player still has the accelerator
+            async with conn.execute(
+                "SELECT quantity FROM inventory WHERE player_id=? AND item_key=? AND item_type='accelerator'",
+                (interaction.user.id, self.selected_acc)
+            ) as cur:
+                row = await cur.fetchone()
+            if not row or row[0] < 1:
+                await interaction.response.edit_message(
+                    embed=discord.Embed(description="❌ You no longer have that accelerator!", color=0xFF0000),
+                    view=None
+                )
+                return
+
+            # Move start_time backwards by shorten_mins
+            old_start = datetime.fromisoformat(exp["start_time"])
+            new_start = old_start - timedelta(minutes=shorten_mins)
+            await conn.execute(
+                "UPDATE expeditions SET start_time=? WHERE id=?",
+                (new_start.isoformat(), exp["id"])
+            )
+            # Remove accelerator from inventory
+            await db.remove_item(conn, interaction.user.id, self.selected_acc)
+            await conn.commit()
+
+        # Calculate new end time
+        new_end = new_start + timedelta(hours=exp["duration_hrs"])
+        now = datetime.now(timezone.utc)
+        remaining = new_end - now
+        pet_name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
+        emoji = ELEMENT_EMOJIS[pet["element"]]
+        ts = int(new_end.timestamp())
+
+        if remaining.total_seconds() <= 0:
+            desc = f"{emoji} **{pet_name}** is now ready! Use `/collect` to grab your loot."
+        else:
+            mins_left = int(remaining.total_seconds() // 60)
+            desc = (
+                f"{emoji} **{pet_name}'s** expedition was sped up by **{shorten_mins} minutes**!\n"
+                f"Now returns <t:{ts}:R> (**{mins_left}min** remaining)"
+            )
+
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                title=f"⏩ Accelerator Applied!",
+                description=desc,
+                color=0x00CED1
+            ),
+            view=None
+        )
+
+
 # ── Cog ───────────────────────────────────────────────────────────────────────
 
 class Expedition(commands.Cog):
@@ -242,6 +371,7 @@ class Expedition(commands.Cog):
         app_commands.Choice(name="6 hours",        value="6h"),
         app_commands.Choice(name="Status",         value="status"),
         app_commands.Choice(name="Cancel",         value="cancel"),
+        app_commands.Choice(name="Accelerate ⏩",  value="accelerate"),
     ])
     async def expedition(self, interaction: discord.Interaction, action: str = "status"):
         action = action.lower().strip()
@@ -252,6 +382,10 @@ class Expedition(commands.Cog):
 
         if action == "cancel":
             await self._cancel(interaction)
+            return
+
+        if action == "accelerate":
+            await self._accelerate(interaction)
             return
 
         duration = DURATION_MAP.get(action)
@@ -361,6 +495,60 @@ class Expedition(commands.Cog):
                 embeds.append(embed)
 
         await interaction.response.send_message(embeds=embeds, ephemeral=True)
+
+    async def _accelerate(self, interaction: discord.Interaction):
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            player = await db.get_player(conn, interaction.user.id)
+            if not player:
+                await interaction.response.send_message("Use `/start` first.", ephemeral=True)
+                return
+
+            # Check they have at least one accelerator
+            async with conn.execute(
+                "SELECT item_key, quantity FROM inventory WHERE player_id=? AND item_type='accelerator' AND quantity>0",
+                (interaction.user.id,)
+            ) as cur:
+                acc_rows = await cur.fetchall()
+
+            if not acc_rows:
+                await interaction.response.send_message(
+                    "You don't have any Expedition Accelerators!\nGet them from `/fish` or `/dig`.",
+                    ephemeral=True
+                )
+                return
+
+            # Check active expeditions
+            async with conn.execute(
+                "SELECT id, pet_id, start_time, duration_hrs FROM expeditions WHERE player_id=? AND returned=0",
+                (interaction.user.id,)
+            ) as cur:
+                rows = await cur.fetchall()
+
+            if not rows:
+                await interaction.response.send_message(
+                    "No active expeditions to accelerate!", ephemeral=True
+                )
+                return
+
+            exp_pet_pairs = []
+            for row in rows:
+                exp_id, pet_id, start_time, duration_hrs = row
+                pet = await db.get_pet(conn, pet_id)
+                exp_dict = {"id": exp_id, "pet_id": pet_id, "start_time": start_time, "duration_hrs": duration_hrs}
+                exp_pet_pairs.append((exp_dict, pet))
+
+        acc_inv = [{"key": r[0], "qty": r[1]} for r in acc_rows]
+        view = AccelerateView(interaction.user.id, exp_pet_pairs, acc_inv)
+
+        embed = discord.Embed(
+            title="⏩ Use an Expedition Accelerator",
+            description=(
+                "Pick which expedition to speed up and which accelerator to use.\n"
+                "The accelerator will shorten the remaining time instantly."
+            ),
+            color=0x00CED1
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     async def _cancel(self, interaction: discord.Interaction):
         async with aiosqlite.connect(db.DB_PATH) as conn:
