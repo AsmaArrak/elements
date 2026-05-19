@@ -104,6 +104,15 @@ async def init_db():
         """)
         await db.commit()
         # Migrations
+        # Pet learned skills
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS pet_skills (
+                pet_id    INTEGER NOT NULL,
+                skill_key TEXT NOT NULL,
+                PRIMARY KEY (pet_id, skill_key)
+            )
+        """)
+        await db.commit()
         # Armor table
         await db.execute("""
             CREATE TABLE IF NOT EXISTS armor_inventory (

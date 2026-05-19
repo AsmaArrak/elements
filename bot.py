@@ -25,6 +25,7 @@ COGS = [
     "cogs.minigames",
     "cogs.party",
     "cogs.armor",
+    "cogs.skills_cmd",
 ]
 
 

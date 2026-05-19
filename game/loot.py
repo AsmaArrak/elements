@@ -1,5 +1,6 @@
 import random
 from config import ELEMENTS, ARMOR_BY_RARITY, ARMOR_POOL
+from game.skills import SKILLS, SCROLL_RARITY_WEIGHTS
 
 # ── Loot tables ───────────────────────────────────────────────────────────────
 
@@ -128,6 +129,28 @@ def generate_expedition_loot(duration_hrs: int, pet_element: str, exploration: i
         results.append(_pick_from(TABLE_MAP[rarity], pet_element))
 
     return results
+
+
+def generate_scroll_drop(duration_hrs: int, pet_element: str) -> dict | None:
+    """Chance to drop a skill scroll. Element is one the pet's element can learn."""
+    from game.skills import SKILL_COMPATIBILITY
+    chance = {1: 0.08, 6: 0.20, 12: 0.38, 24: 0.60}
+    if random.random() > chance.get(duration_hrs, 0.08):
+        return None
+    rarity = random.choices(
+        list(SCROLL_RARITY_WEIGHTS.keys()),
+        weights=list(SCROLL_RARITY_WEIGHTS.values()), k=1
+    )[0]
+    compatible_elements = SKILL_COMPATIBILITY.get(pet_element, [pet_element])
+    compatible_skills = [
+        k for k, v in SKILLS.items()
+        if v["rarity"] == rarity and v["element"] in compatible_elements
+    ]
+    if not compatible_skills:
+        compatible_skills = [k for k, v in SKILLS.items() if v["rarity"] == rarity]
+    skill_key = random.choice(compatible_skills)
+    skill = SKILLS[skill_key]
+    return {"skill_key": skill_key, "rarity": rarity, "name": skill["name"], "element": skill["element"]}
 
 
 def generate_armor_drop(duration_hrs: int) -> dict | None:

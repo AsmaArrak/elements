@@ -9,7 +9,7 @@ from config import (
     ELEMENT_DISPLAY, ELEMENT_EMOJIS, ELEMENT_COLORS, PET_NAMES, STAGE_NAMES,
     FOOD_ITEMS, STAT_ITEMS, EXPEDITION_XP, EXPLORATION_GAIN, get_pet_image
 )
-from game.loot import generate_expedition_loot, generate_armor_drop
+from game.loot import generate_expedition_loot, generate_armor_drop, generate_scroll_drop
 
 
 VALID_DURATIONS = {1, 6, 12, 24}
@@ -305,6 +305,14 @@ class Expedition(commands.Cog):
                 "UPDATE pets SET exploration=? WHERE id=?", (new_exploration, pet["id"])
             )
 
+            # Scroll drop
+            scroll_drop = generate_scroll_drop(exp["duration_hrs"], pet["element"])
+            if scroll_drop:
+                await db.add_item(
+                    conn, interaction.user.id,
+                    scroll_drop["skill_key"], "scroll", 1, scroll_drop["element"]
+                )
+
             # Armor drop
             armor_drop = generate_armor_drop(exp["duration_hrs"])
             if armor_drop:
@@ -346,6 +354,10 @@ class Expedition(commands.Cog):
                 mega_found = True
         if coin_total:
             loot_lines.append(f"• **{coin_total} coins** 💰")
+        if scroll_drop:
+            from config import RARITY_EMOJIS
+            r_emoji = RARITY_EMOJIS.get(scroll_drop["rarity"], "")
+            loot_lines.append(f"• {r_emoji} **{scroll_drop['name']} Scroll** 📜 *(skill scroll)*")
         if armor_drop:
             from config import RARITY_EMOJIS
             r_emoji = RARITY_EMOJIS.get(armor_drop["rarity"], "")

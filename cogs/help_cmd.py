@@ -58,9 +58,20 @@ class Help(commands.Cog):
         embed.add_field(
             name="⚔️ Battle",
             value=(
-                "`/setparty` — Set the order of your pets for battle\n"
+                "`/setparty` — Set your battle party order\n"
                 "`/battle @user` — Challenge someone to PvP\n"
                 "`/battlelog` — View your recent battle history"
+            ),
+            inline=False
+        )
+        embed.add_field(
+            name="📜 Skills",
+            value=(
+                "`/learn` — Teach your pet a skill from a scroll\n"
+                "`/skills` — View your pets' learned skills\n"
+                "`/forgetskill <name>` — Forget a skill to free a slot\n"
+                "`/sellscroll <name>` — Sell a scroll for coins\n"
+                "*Scrolls drop from expeditions. Each pet learns up to 4 skills.*"
             ),
             inline=False
         )

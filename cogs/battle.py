@@ -9,9 +9,10 @@ import database as db
 from config import (
     ELEMENT_DISPLAY, ELEMENT_EMOJIS, ELEMENT_COLORS, PET_NAMES, STAGE_NAMES,
     BATTLE_WIN_XP, BATTLE_LOSS_XP, BATTLE_WIN_COINS, BATTLE_LOSS_COINS,
-    get_pet_image
+    TYPE_ADVANTAGE, RARITY_EMOJIS, get_pet_image
 )
 from game.stats import effective_stats, hp_bar, calc_physical_damage, calc_magic_damage
+from game.skills import SKILLS
 
 # In-memory battle states: channel_id -> BattleState
 active_battles: dict[int, "BattleState"] = {}
@@ -126,7 +127,27 @@ class BattleState:
 
             if action["type"] == "attack":
                 move = action.get("move", "physical")
-                if move == "physical":
+                if move == "skill":
+                    skill_key = action.get("skill_key")
+                    skill = SKILLS.get(skill_key, {})
+                    mult = skill.get("mult", 1.3)
+                    skill_elem = skill.get("element", attacker.element)
+                    if skill.get("type") == "physical":
+                        base = calc_physical_damage(attacker.stats, defender.stats)
+                        dmg = int(base * mult)
+                    else:
+                        base, _ = calc_magic_damage(attacker.pet, defender.pet, attacker.stats, defender.stats)
+                        dmg = int(base * mult)
+                    # Type advantage for skill element
+                    if defender.element in TYPE_ADVANTAGE.get(skill_elem, []):
+                        dmg = int(dmg * 1.5)
+                        se_note = " ✨ *Super effective!*"
+                    else:
+                        se_note = ""
+                    defender.take_damage(dmg)
+                    r_emoji = RARITY_EMOJIS.get(skill.get("rarity", ""), "")
+                    logs.append(f"{r_emoji} **{attacker.name}** used **{skill.get('name', skill_key)}** on **{defender.name}** for **{dmg}** damage!{se_note}")
+                elif move == "physical":
                     dmg = calc_physical_damage(attacker.stats, defender.stats)
                     defender.take_damage(dmg)
                     logs.append(f"⚔️ **{attacker.name}** attacked **{defender.name}** for **{dmg}** damage!")
@@ -295,6 +316,56 @@ class BattleView(discord.ui.View):
             await interaction.response.send_message("You're not in this battle!", ephemeral=True)
             return
         await self._set_action(interaction, {"type": "attack", "move": "magic"})
+
+    @discord.ui.button(label="📚 Skills", style=discord.ButtonStyle.primary, row=0)
+    async def skill_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self._is_participant(interaction.user):
+            await interaction.response.send_message("You're not in this battle!", ephemeral=True)
+            return
+        is_c = self._is_challenger(interaction.user)
+        current = self.state.c_current if is_c else self.state.o_current
+        # Load learned skills from DB
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            async with conn.execute(
+                "SELECT skill_key FROM pet_skills WHERE pet_id=?", (current.pet["id"],)
+            ) as cur:
+                learned = [r[0] for r in await cur.fetchall()]
+        if not learned:
+            await interaction.response.send_message(
+                "This pet has no learned skills! Use `/learn` with scrolls from expeditions.",
+                ephemeral=True
+            )
+            return
+        options = []
+        for sk in learned:
+            s = SKILLS.get(sk, {})
+            r_emoji = RARITY_EMOJIS.get(s.get("rarity", ""), "⚪")
+            stat = "ATK" if s.get("type") == "physical" else "MGK"
+            options.append(discord.SelectOption(
+                label=s.get("name", sk),
+                value=sk,
+                description=f"{s.get('mult', 1)}x {stat} · {s.get('rarity', '').title()}",
+                emoji=r_emoji
+            ))
+        skill_select = discord.ui.Select(placeholder="Choose a skill...", options=options)
+        async def skill_callback(inter: discord.Interaction):
+            if inter.user.id != interaction.user.id:
+                await inter.response.send_message("Not your menu!", ephemeral=True)
+                return
+            chosen = skill_select.values[0]
+            await inter.response.send_message(
+                f"Skill **{SKILLS[chosen]['name']}** queued!", ephemeral=True
+            )
+            action = {"type": "attack", "move": "skill", "skill_key": chosen}
+            if is_c:
+                self.state.c_action = action
+            else:
+                self.state.o_action = action
+            await maybe_resolve(self.state, inter)
+        skill_select.callback = skill_callback
+        sv = discord.ui.View(timeout=30)
+        sv.add_item(skill_select)
+        await interaction.response.send_message("Choose a skill to use:", view=sv, ephemeral=True)
 
     @discord.ui.button(label="🔄 Switch", style=discord.ButtonStyle.secondary, row=0)
     async def switch(self, interaction: discord.Interaction, button: discord.ui.Button):
