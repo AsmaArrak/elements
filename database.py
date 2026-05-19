@@ -3,7 +3,7 @@ import os
 import json
 from datetime import datetime, timezone
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "elementals.db")
+DB_PATH = os.getenv("DB_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "elementals.db"))
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
