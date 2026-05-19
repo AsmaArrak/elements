@@ -77,26 +77,33 @@ class Pet(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="profile", description="View your profile and active pet")
-    async def profile(self, interaction: discord.Interaction):
-        async with aiosqlite.connect(db.DB_PATH) as conn:
-            player = await db.get_player(conn, interaction.user.id)
-            if not player:
-                await interaction.response.send_message(
-                    "You haven't started yet! Use `/start` to begin.", ephemeral=True
-                )
-                return
-            pet = await db.get_active_pet(conn, interaction.user.id)
-            if not pet:
-                await interaction.response.send_message(
-                    "You have no active pet! Use `/start` to begin.", ephemeral=True
-                )
-                return
-            all_pets = await db.get_player_pets(conn, interaction.user.id)
+    @app_commands.command(name="profile", description="View your profile or another player's profile")
+    @app_commands.describe(player="Another player to look up (leave empty for your own profile)")
+    async def profile(self, interaction: discord.Interaction, player: discord.Member = None):
+        target = player or interaction.user
+        is_self = target.id == interaction.user.id
 
-        embed, file = pet_embed(pet, interaction.user)
-        embed.set_footer(text=f"💰 {player['coins']} coins | Team: {len(all_pets)} pet(s)")
-        await interaction.response.send_message(embed=embed, file=file)
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            p = await db.get_player(conn, target.id)
+            if not p:
+                msg = "You haven't started yet! Use `/start` to begin." if is_self else f"**{target.display_name}** hasn't started yet."
+                await interaction.response.send_message(msg, ephemeral=True)
+                return
+            pet = await db.get_active_pet(conn, target.id)
+            if not pet:
+                msg = "You have no active pet." if is_self else f"**{target.display_name}** has no active pet."
+                await interaction.response.send_message(msg, ephemeral=True)
+                return
+            all_pets = await db.get_player_pets(conn, target.id)
+
+        embed, file = pet_embed(pet, target)
+        if is_self:
+            embed.set_footer(text=f"💰 {p['coins']} coins | Team: {len(all_pets)} pet(s)")
+        else:
+            embed.set_footer(text=f"Team: {len(all_pets)} pet(s)")
+
+        # Own profile is private; viewing someone else's is public
+        await interaction.response.send_message(embed=embed, file=file, ephemeral=is_self)
 
     @app_commands.command(name="pet", description="Detailed view of your active pet's stats and bonuses")
     async def pet_cmd(self, interaction: discord.Interaction):

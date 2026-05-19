@@ -95,7 +95,7 @@ class Help(commands.Cog):
             inline=False
         )
         embed.set_footer(text="Evo Stones drop from expeditions and channel drops. Mega Stones only from expeditions!")
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
