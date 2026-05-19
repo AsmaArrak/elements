@@ -373,5 +373,75 @@ class Economy(commands.Cog):
         )
 
 
+    @app_commands.command(name="restart", description="Delete everything and start over from scratch")
+    async def restart(self, interaction: discord.Interaction):
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            player = await db.get_player(conn, interaction.user.id)
+        if not player:
+            await interaction.response.send_message(
+                "You haven't started yet! Use `/start`.", ephemeral=True
+            )
+            return
+
+        embed = discord.Embed(
+            title="⚠️ Are you sure you want to restart?",
+            description=(
+                "This will **permanently delete**:\n"
+                "• All your pets\n"
+                "• Your entire inventory\n"
+                "• All your coins\n"
+                "• Your expedition progress\n\n"
+                "**This cannot be undone.**"
+            ),
+            color=0xFF0000
+        )
+        view = RestartConfirmView(interaction.user.id)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+
+class RestartConfirmView(discord.ui.View):
+    def __init__(self, user_id: int):
+        super().__init__(timeout=30)
+        self.user_id = user_id
+
+    @discord.ui.button(label="✅ Yes, delete everything", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This isn't your restart!", ephemeral=True)
+            return
+        self.stop()
+
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            await conn.execute("DELETE FROM inventory WHERE player_id=?", (interaction.user.id,))
+            await conn.execute("DELETE FROM expeditions WHERE player_id=?", (interaction.user.id,))
+            await conn.execute("DELETE FROM pets WHERE player_id=?", (interaction.user.id,))
+            await conn.execute("DELETE FROM players WHERE user_id=?", (interaction.user.id,))
+            await conn.commit()
+
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                title="✅ Account reset!",
+                description="Everything has been wiped. Use `/start` to begin a new journey!",
+                color=0x2ECC71
+            ),
+            view=None
+        )
+
+    @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This isn't yours!", ephemeral=True)
+            return
+        self.stop()
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                title="Cancelled",
+                description="Your account is safe. Nothing was deleted.",
+                color=0x95A5A6
+            ),
+            view=None
+        )
+
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(Economy(bot))
