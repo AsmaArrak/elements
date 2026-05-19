@@ -78,15 +78,6 @@ class Help(commands.Cog):
             inline=False
         )
         embed.add_field(
-            name="⚙️ Server Setup (Admin)",
-            value=(
-                "`/setup drops #channel` — Set the channel for item drops\n"
-                "`/setup announcements #channel` — Set the Mega Evo announcement channel\n"
-                "`/setup info` — View current server config"
-            ),
-            inline=False
-        )
-        embed.add_field(
             name="🌱 Evolution Path",
             value=(
                 "🥚 Egg → Feed **3 times** → Evo 1\n"
