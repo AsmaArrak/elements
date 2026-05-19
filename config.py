@@ -168,12 +168,12 @@ SHOP_ITEMS = {
 # Cake and honey are NOT sold in the shop — rare drops only
 
 STAT_ITEMS = {
-    "crystal_shard":  {"stat": "mgk", "boost": 10, "display": "Crystal Shard 🔷"},
-    "iron_scrap":     {"stat": "def", "boost": 10, "display": "Iron Scrap 🪙"},
-    "swift_feather":  {"stat": "spd", "boost": 10, "display": "Swift Feather 🪶"},
-    "ancient_fang":   {"stat": "atk", "boost": 12, "display": "Ancient Fang 🦷"},
-    "mystic_root":    {"stat": "res", "boost": 10, "display": "Mystic Root 🌱"},
-    "life_crystal":   {"stat": "hp",  "boost": 20, "display": "Life Crystal 💠"},
+    "crystal_shard":  {"stat": "mgk", "boost": 10, "display": "Crystal Shard 🔷",  "desc": "Permanently +10 MGK"},
+    "iron_scrap":     {"stat": "def", "boost": 10, "display": "Iron Scrap 🪙",      "desc": "Permanently +10 DEF"},
+    "swift_feather":  {"stat": "spd", "boost": 10, "display": "Swift Feather 🪶",   "desc": "Permanently +10 SPD"},
+    "ancient_fang":   {"stat": "atk", "boost": 12, "display": "Ancient Fang 🦷",    "desc": "Permanently +12 ATK"},
+    "mystic_root":    {"stat": "res", "boost": 10, "display": "Mystic Root 🌱",     "desc": "Permanently +10 RES"},
+    "life_crystal":   {"stat": "hp",  "boost": 20, "display": "Life Crystal 💠",    "desc": "Permanently +20 HP"},
 }
 
 # ── Armor ─────────────────────────────────────────────────────────────────────

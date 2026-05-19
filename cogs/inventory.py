@@ -58,22 +58,51 @@ class Inventory(commands.Cog):
 
         # Group by type
         groups: dict[str, list[str]] = {}
-        type_order = ["food", "stat_item", "evo_stone", "mega_stone", "egg", "coins"]
+        type_order = ["food", "stat_item", "evo_stone", "mega_stone", "egg", "scroll", "coins"]
         type_labels = {
-            "food": "🍖 Food",
+            "food":      "🍖 Food",
             "stat_item": "📦 Stat Items",
             "evo_stone": "💠 Evolution Stones",
             "mega_stone": "⭐ Mega Stones",
-            "egg": "🥚 Eggs",
-            "coins": "💰 Coins",
+            "egg":       "🥚 Eggs",
+            "scroll":    "📜 Skill Scrolls",
+            "coins":     "💰 Coins",
         }
+
+        from config import RARITY_EMOJIS
+        from game.skills import SKILLS
 
         for item in items:
             t = item["item_type"]
             if t not in groups:
                 groups[t] = []
             name = item_display_name(item["item_key"], item["item_type"], item["element"])
-            groups[t].append(f"**{name}** ×{item['quantity']}")
+
+            if t == "stat_item":
+                desc = STAT_ITEMS.get(item["item_key"], {}).get("desc", "")
+                groups[t].append(f"**{name}** ×{item['quantity']} — *{desc}*")
+            elif t == "food":
+                food = FOOD_ITEMS.get(item["item_key"], {})
+                stat = food.get("stat", "?").upper()
+                boost = food.get("boost", 0)
+                rarity = food.get("rarity", "common")
+                r_emoji = RARITY_EMOJIS.get(rarity, "⚪")
+                groups[t].append(f"{r_emoji} **{name}** ×{item['quantity']} — *+{boost} {stat}*")
+            elif t == "scroll":
+                skill = SKILLS.get(item["item_key"], {})
+                rarity = skill.get("rarity", "common")
+                r_emoji = RARITY_EMOJIS.get(rarity, "⚪")
+                elem = skill.get("element", "").title()
+                groups[t].append(f"{r_emoji} **{skill.get('name', name)} Scroll** ×{item['quantity']} — *{elem} · {skill.get('desc', '')}*")
+            elif t == "evo_stone":
+                stone_name = "Uncommon Evo Stone (Evo 1→2)" if item["item_key"] == "evo_stone_uncommon" else "Rare Evo Stone (Evo 2→3)"
+                elem = ELEMENT_DISPLAY.get(item["element"], "") if item["element"] else ""
+                groups[t].append(f"**{elem} {stone_name}** ×{item['quantity']}")
+            elif t == "mega_stone":
+                elem = ELEMENT_DISPLAY.get(item["element"], "") if item["element"] else ""
+                groups[t].append(f"**{elem} Mega Stone** ×{item['quantity']} — *Evo 3→Mega (need Exploration 100)*")
+            else:
+                groups[t].append(f"**{name}** ×{item['quantity']}")
 
         for t in type_order:
             if t in groups:
@@ -179,7 +208,15 @@ class Inventory(commands.Cog):
 
                 from config import get_pet_image
                 image_path = get_pet_image(pet["element"], pet["variant"], target_stage)
-                file = discord.File(image_path, filename="evo.png")
+                pet_file = discord.File(image_path, filename="evo.png")
+
+                # Show the stone art as thumbnail
+                stone_file = None
+                try:
+                    stone_path = get_stone_image(pet["element"], item)
+                    stone_file = discord.File(stone_path, filename="stone.png")
+                except Exception:
+                    pass
 
                 embed = discord.Embed(
                     title=f"{'⭐ MEGA ' if target_stage == 4 else '✨ '}EVOLUTION!",
@@ -190,7 +227,11 @@ class Inventory(commands.Cog):
                     color=color
                 )
                 embed.set_image(url="attachment://evo.png")
-                await interaction.response.send_message(embed=embed, file=file)
+                if stone_file:
+                    embed.set_thumbnail(url="attachment://stone.png")
+
+                files = [pet_file] + ([stone_file] if stone_file else [])
+                await interaction.response.send_message(embed=embed, files=files)
 
                 # Mega announcement
                 if target_stage == 4 and interaction.guild:

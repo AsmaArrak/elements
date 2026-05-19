@@ -65,7 +65,12 @@ def pet_embed(pet: dict, owner: discord.User | discord.Member = None) -> tuple[d
     elif stage > 0:
         embed.add_field(name="📈 Level", value="**MAX LEVEL** ⭐", inline=False)
 
-    embed.add_field(name="🧭 Exploration", value=f"{pet['exploration']}/100", inline=True)
+    expl = pet['exploration']
+    embed.add_field(
+        name="🧭 Exploration",
+        value=f"{expl}/100 {'✅' if expl >= 100 else f'({100 - expl} to Mega)'}",
+        inline=True
+    )
 
     image_path = get_pet_image(element, variant, stage)
     file = discord.File(image_path, filename="pet.png")
@@ -385,7 +390,9 @@ class Pet(commands.Cog):
         embed.add_field(name="​", value="​", inline=False)
         embed.add_field(name="Stage", value=STAGE_NAMES[stage], inline=True)
         embed.add_field(name="Level", value=f"{level}/100", inline=True)
-        embed.add_field(name="Exploration", value=f"{pet['exploration']}/100", inline=True)
+        expl = pet['exploration']
+        expl_note = " ✅ Mega unlocked!" if expl >= 100 else f" ({100 - expl} to Mega)"
+        embed.add_field(name="🧭 Exploration", value=f"{expl}/100{expl_note}", inline=True)
 
         cap_hp = stat_cap(pet["base_hp"], level)
         embed.add_field(
@@ -397,6 +404,12 @@ class Pet(commands.Cog):
             ),
             inline=False
         )
+        expl_val = pet['exploration']
+        if expl_val >= 100:
+            expl_desc = f"**{expl_val}/100** ✅\n*Mega Stone drops **unlocked**! You can now find them on expeditions.*"
+        else:
+            expl_desc = f"**{expl_val}/100**\n*Increases by going on expeditions. Reach **100** to unlock Mega Stone drops!*"
+        embed.add_field(name="🧭 Exploration", value=expl_desc, inline=False)
 
         # Equipped armor
         armor_id = pet.get("equipped_armor")
