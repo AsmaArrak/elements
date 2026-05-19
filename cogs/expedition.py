@@ -12,11 +12,29 @@ from config import (
 from game.loot import generate_expedition_loot, generate_armor_drop, generate_scroll_drop
 
 
-VALID_DURATIONS = {1, 6, 12, 24}
+# Duration label → hours (float)
+DURATION_MAP: dict[str, float] = {
+    "30m":  0.5,
+    "1h30": 1.5,
+    "4h":   4.0,
+    "6h":   6.0,
+}
+
+# Human-readable label for each duration
+DURATION_LABELS: dict[float, str] = {
+    0.5: "30-minute",
+    1.5: "1.5-hour",
+    4.0: "4-hour",
+    6.0: "6-hour",
+}
+
+
+def fmt_dur(hrs: float) -> str:
+    return DURATION_LABELS.get(hrs, f"{hrs}-hour")
 
 
 class ExpeditionPetSelect(discord.ui.View):
-    def __init__(self, user_id: int, pets: list[dict], duration: int):
+    def __init__(self, user_id: int, pets: list[dict], duration: float):
         super().__init__(timeout=60)
         self.user_id = user_id
         self.duration = duration
@@ -51,38 +69,50 @@ class ExpeditionPetSelect(discord.ui.View):
             )
             await conn.commit()
 
-        pet_name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
-        emoji = ELEMENT_EMOJIS[pet["element"]]
-        color = ELEMENT_COLORS[pet["element"]]
-        returns_at = datetime.now(timezone.utc) + timedelta(hours=self.duration)
-        ts = int(returns_at.timestamp())
-
-        embed = discord.Embed(
-            title="🗺️ Expedition Started!",
-            description=(
-                f"{emoji} **{pet_name}** has set out on a **{self.duration}-hour expedition**!\n\n"
-                f"Returns: <t:{ts}:R> (<t:{ts}:t>)\n\n"
-                f"Your pet is **locked** from battles until it returns.\n"
-                f"Exploration stat: **{pet['exploration']}/100**"
-                + (" — Mega Stone eligible! 🌟" if pet["exploration"] >= 100 else "")
-            ),
-            color=color
-        )
-        image_path = get_pet_image(pet["element"], pet["variant"], pet["stage"])
+        await _send_expedition_started(interaction, pet, self.duration, followup=True)
         try:
-            file = discord.File(image_path, filename="pet.png")
-            embed.set_thumbnail(url="attachment://pet.png")
-            await interaction.followup.send(embed=embed, file=file)
-        except Exception:
-            await interaction.followup.send(embed=embed)
-
-        try:
+            pet_name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
             await interaction.edit_original_response(
                 embed=discord.Embed(description=f"✅ {pet_name} sent on expedition!", color=0x2ECC71),
                 view=None
             )
         except Exception:
             pass
+
+
+async def _send_expedition_started(
+    interaction: discord.Interaction, pet: dict, duration: float, followup: bool = False
+):
+    pet_name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
+    emoji = ELEMENT_EMOJIS[pet["element"]]
+    color = ELEMENT_COLORS[pet["element"]]
+    returns_at = datetime.now(timezone.utc) + timedelta(hours=duration)
+    ts = int(returns_at.timestamp())
+
+    embed = discord.Embed(
+        title="🗺️ Expedition Started!",
+        description=(
+            f"{emoji} **{pet_name}** has set out on a **{fmt_dur(duration)} expedition**!\n\n"
+            f"Returns: <t:{ts}:R> (<t:{ts}:t>)\n\n"
+            f"Your pet is **locked** from battles until it returns.\n"
+            f"Exploration: **{pet['exploration']}/100**"
+            + (" — Mega Stone eligible! 🌟" if pet["exploration"] >= 100 else "")
+        ),
+        color=color
+    )
+    image_path = get_pet_image(pet["element"], pet["variant"], pet["stage"])
+    try:
+        file = discord.File(image_path, filename="pet.png")
+        embed.set_thumbnail(url="attachment://pet.png")
+        if followup:
+            await interaction.followup.send(embed=embed, file=file)
+        else:
+            await interaction.response.send_message(embed=embed, file=file)
+    except Exception:
+        if followup:
+            await interaction.followup.send(embed=embed)
+        else:
+            await interaction.response.send_message(embed=embed)
 
 
 def item_display_name_simple(item_key: str, item_type: str, element: str = None) -> str:
@@ -103,29 +133,132 @@ def item_display_name_simple(item_key: str, item_type: str, element: str = None)
     return item_key.replace("_", " ").title()
 
 
+# ── Cancel UI ─────────────────────────────────────────────────────────────────
+
+class CancelConfirmView(discord.ui.View):
+    def __init__(self, user_id: int, exp_id: int, pet: dict):
+        super().__init__(timeout=30)
+        self.user_id = user_id
+        self.exp_id = exp_id
+        self.pet = pet
+
+    @discord.ui.button(label="❌ Cancel Expedition", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your menu!", ephemeral=True)
+            return
+        self.stop()
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            await conn.execute(
+                "UPDATE expeditions SET returned=1 WHERE id=?", (self.exp_id,)
+            )
+            await conn.commit()
+        pet_name = self.pet.get("nickname") or PET_NAMES[self.pet["element"]][self.pet["variant"]][self.pet["stage"]]
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                title="🏠 Expedition Cancelled",
+                description=f"**{pet_name}** has been recalled. No items were collected.",
+                color=0xFF6B6B
+            ),
+            view=None
+        )
+
+    @discord.ui.button(label="Keep going", style=discord.ButtonStyle.secondary)
+    async def keep(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your menu!", ephemeral=True)
+            return
+        self.stop()
+        await interaction.response.edit_message(
+            embed=discord.Embed(description="✅ Expedition continues!", color=0x2ECC71),
+            view=None
+        )
+
+
+class CancelSelectView(discord.ui.View):
+    """Shown when the player has multiple active expeditions to choose from."""
+
+    def __init__(self, user_id: int, exp_pet_pairs: list[tuple[dict, dict]]):
+        super().__init__(timeout=60)
+        self.user_id = user_id
+        self.pairs_by_exp = {str(exp["id"]): (exp, pet) for exp, pet in exp_pet_pairs}
+
+        options = []
+        for exp, pet in exp_pet_pairs:
+            name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
+            emoji = ELEMENT_EMOJIS[pet["element"]]
+            end = datetime.fromisoformat(exp["start_time"]) + timedelta(hours=exp["duration_hrs"])
+            ts = int(end.timestamp())
+            options.append(discord.SelectOption(
+                label=name,
+                value=str(exp["id"]),
+                description=f"{fmt_dur(exp['duration_hrs'])} expedition · returns <t:{ts}:R>",
+                emoji=emoji
+            ))
+
+        select = discord.ui.Select(placeholder="Choose expedition to cancel...", options=options)
+        select.callback = self._selected
+        self.add_item(select)
+
+    async def _selected(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your menu!", ephemeral=True)
+            return
+        exp, pet = self.pairs_by_exp[interaction.data["values"][0]]
+        self.stop()
+
+        pet_name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
+        emoji = ELEMENT_EMOJIS[pet["element"]]
+        end = datetime.fromisoformat(exp["start_time"]) + timedelta(hours=exp["duration_hrs"])
+        ts = int(end.timestamp())
+
+        confirm_view = CancelConfirmView(self.user_id, exp["id"], pet)
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                title="⚠️ Cancel Expedition?",
+                description=(
+                    f"{emoji} **{pet_name}** is on a {fmt_dur(exp['duration_hrs'])} expedition.\n"
+                    f"Was due back <t:{ts}:R>.\n\n"
+                    "**No items will be collected.** Are you sure?"
+                ),
+                color=0xFF9800
+            ),
+            view=confirm_view
+        )
+
+
+# ── Cog ───────────────────────────────────────────────────────────────────────
+
 class Expedition(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="expedition", description="Send your active pet on an expedition")
-    @app_commands.describe(
-        duration="Duration: 1, 6, 12, or 24 hours",
-        status="Use 'status' instead of a number to check your current expedition"
-    )
-    async def expedition(
-        self,
-        interaction: discord.Interaction,
-        duration: int = 0,
-        status: str = ""
-    ):
-        # /expedition status
-        if status.lower() == "status" or duration == 0:
+    @app_commands.command(name="expedition", description="Send your pet on an expedition, check status, or cancel")
+    @app_commands.describe(action="Duration (30m, 1h30, 4h, 6h), 'status', or 'cancel'")
+    @app_commands.choices(action=[
+        app_commands.Choice(name="30 minutes",     value="30m"),
+        app_commands.Choice(name="1 hour 30 min",  value="1h30"),
+        app_commands.Choice(name="4 hours",        value="4h"),
+        app_commands.Choice(name="6 hours",        value="6h"),
+        app_commands.Choice(name="Status",         value="status"),
+        app_commands.Choice(name="Cancel",         value="cancel"),
+    ])
+    async def expedition(self, interaction: discord.Interaction, action: str = "status"):
+        action = action.lower().strip()
+
+        if action == "status":
             await self._status(interaction)
             return
 
-        if duration not in VALID_DURATIONS:
+        if action == "cancel":
+            await self._cancel(interaction)
+            return
+
+        duration = DURATION_MAP.get(action)
+        if duration is None:
             await interaction.response.send_message(
-                "Choose a duration: **1**, **6**, **12**, or **24** hours.", ephemeral=True
+                "Choose a duration: `30m`, `1h30`, `4h`, or `6h`. Or use `status` / `cancel`.",
+                ephemeral=True
             )
             return
 
@@ -136,7 +269,6 @@ class Expedition(commands.Cog):
                 return
 
             all_pets = await db.get_player_pets(conn, interaction.user.id)
-            # Find which pets are already on expedition
             async with conn.execute(
                 "SELECT pet_id FROM expeditions WHERE player_id=? AND returned=0",
                 (interaction.user.id,)
@@ -168,35 +300,11 @@ class Expedition(commands.Cog):
                     (pet["id"], interaction.user.id, db.now_iso(), duration)
                 )
                 await conn.commit()
-
-            pet_name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
-            emoji = ELEMENT_EMOJIS[pet["element"]]
-            color = ELEMENT_COLORS[pet["element"]]
-            returns_at = datetime.now(timezone.utc) + timedelta(hours=duration)
-            ts = int(returns_at.timestamp())
-
-            embed = discord.Embed(
-                title="🗺️ Expedition Started!",
-                description=(
-                    f"{emoji} **{pet_name}** has set out on a **{duration}-hour expedition**!\n\n"
-                    f"Returns: <t:{ts}:R> (<t:{ts}:t>)\n\n"
-                    f"Your pet is **locked** from battles until it returns.\n"
-                    f"Exploration stat: **{pet['exploration']}/100**"
-                    + (" — Mega Stone eligible! 🌟" if pet["exploration"] >= 100 else "")
-                ),
-                color=color
-            )
-            image_path = get_pet_image(pet["element"], pet["variant"], pet["stage"])
-            try:
-                file = discord.File(image_path, filename="pet.png")
-                embed.set_thumbnail(url="attachment://pet.png")
-                await interaction.response.send_message(embed=embed, file=file)
-            except Exception:
-                await interaction.response.send_message(embed=embed)
+            await _send_expedition_started(interaction, pet, duration)
         else:
             view = ExpeditionPetSelect(interaction.user.id, eligible, duration)
             await interaction.response.send_message(
-                f"Which pet do you want to send on a **{duration}-hour expedition**?",
+                f"Which pet do you want to send on a **{fmt_dur(duration)} expedition**?",
                 view=view, ephemeral=True
             )
 
@@ -206,43 +314,112 @@ class Expedition(commands.Cog):
             if not player:
                 await interaction.response.send_message("Use `/start` first.", ephemeral=True)
                 return
-            exp = await db.get_active_expedition(conn, interaction.user.id)
-            if not exp:
+
+            async with conn.execute(
+                "SELECT id, pet_id, start_time, duration_hrs FROM expeditions WHERE player_id=? AND returned=0",
+                (interaction.user.id,)
+            ) as cur:
+                rows = await cur.fetchall()
+
+            if not rows:
                 await interaction.response.send_message(
-                    "No active expedition. Start one with `/expedition 6` (or 1/12/24).",
+                    "No active expeditions. Start one with `/expedition 30m` (or `1h30`, `4h`, `6h`).",
                     ephemeral=True
                 )
                 return
-            pet = await db.get_pet(conn, exp["pet_id"])
 
-        start = datetime.fromisoformat(exp["start_time"])
-        duration = exp["duration_hrs"]
-        end = start + timedelta(hours=duration)
-        now = datetime.now(timezone.utc)
-        remaining = end - now
+            embeds = []
+            for row in rows:
+                exp_id, pet_id, start_time, duration_hrs = row
+                pet = await db.get_pet(conn, pet_id)
+                pet_name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
+                emoji = ELEMENT_EMOJIS[pet["element"]]
+                color = ELEMENT_COLORS[pet["element"]]
 
-        pet_name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
-        emoji = ELEMENT_EMOJIS[pet["element"]]
-        color = ELEMENT_COLORS[pet["element"]]
-        ts = int(end.timestamp())
+                start = datetime.fromisoformat(start_time)
+                end = start + timedelta(hours=duration_hrs)
+                now = datetime.now(timezone.utc)
+                ts = int(end.timestamp())
 
-        if remaining.total_seconds() <= 0:
-            embed = discord.Embed(
-                title=f"📦 Expedition Complete!",
-                description=f"{emoji} **{pet_name}** has returned! Use `/collect` to get your loot.",
-                color=color
+                if (end - now).total_seconds() <= 0:
+                    embed = discord.Embed(
+                        title="📦 Expedition Complete!",
+                        description=f"{emoji} **{pet_name}** has returned! Use `/collect` to get your loot.",
+                        color=color
+                    )
+                else:
+                    remaining = end - now
+                    hrs = int(remaining.total_seconds() // 3600)
+                    mins = int((remaining.total_seconds() % 3600) // 60)
+                    embed = discord.Embed(
+                        title=f"🗺️ {pet_name} is exploring...",
+                        description=f"Returns <t:{ts}:R> | **{hrs}h {mins}m** remaining",
+                        color=color
+                    )
+                embed.add_field(name="Duration", value=fmt_dur(duration_hrs), inline=True)
+                embed.add_field(name="Exploration", value=f"{pet['exploration']}/100", inline=True)
+                embeds.append(embed)
+
+        await interaction.response.send_message(embeds=embeds, ephemeral=True)
+
+    async def _cancel(self, interaction: discord.Interaction):
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            player = await db.get_player(conn, interaction.user.id)
+            if not player:
+                await interaction.response.send_message("Use `/start` first.", ephemeral=True)
+                return
+
+            async with conn.execute(
+                "SELECT id, pet_id, start_time, duration_hrs FROM expeditions WHERE player_id=? AND returned=0",
+                (interaction.user.id,)
+            ) as cur:
+                rows = await cur.fetchall()
+
+            if not rows:
+                await interaction.response.send_message(
+                    "You have no active expeditions to cancel.", ephemeral=True
+                )
+                return
+
+            exp_pet_pairs = []
+            for row in rows:
+                exp_id, pet_id, start_time, duration_hrs = row
+                pet = await db.get_pet(conn, pet_id)
+                exp_dict = {"id": exp_id, "pet_id": pet_id, "start_time": start_time, "duration_hrs": duration_hrs}
+                exp_pet_pairs.append((exp_dict, pet))
+
+        if len(exp_pet_pairs) == 1:
+            exp, pet = exp_pet_pairs[0]
+            pet_name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
+            emoji = ELEMENT_EMOJIS[pet["element"]]
+            end = datetime.fromisoformat(exp["start_time"]) + timedelta(hours=exp["duration_hrs"])
+            ts = int(end.timestamp())
+
+            view = CancelConfirmView(interaction.user.id, exp["id"], pet)
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    title="⚠️ Cancel Expedition?",
+                    description=(
+                        f"{emoji} **{pet_name}** is on a {fmt_dur(exp['duration_hrs'])} expedition.\n"
+                        f"Was due back <t:{ts}:R>.\n\n"
+                        "**No items will be collected.** Are you sure?"
+                    ),
+                    color=0xFF9800
+                ),
+                view=view,
+                ephemeral=True
             )
         else:
-            hrs = int(remaining.total_seconds() // 3600)
-            mins = int((remaining.total_seconds() % 3600) // 60)
-            embed = discord.Embed(
-                title=f"🗺️ {pet_name} is exploring...",
-                description=f"Returns <t:{ts}:R> | **{hrs}h {mins}m** remaining",
-                color=color
+            view = CancelSelectView(interaction.user.id, exp_pet_pairs)
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    title="⚠️ Cancel an Expedition",
+                    description="You have multiple active expeditions. Choose which one to cancel.\n**No items will be collected.**",
+                    color=0xFF9800
+                ),
+                view=view,
+                ephemeral=True
             )
-        embed.add_field(name="Duration", value=f"{duration}h expedition", inline=True)
-        embed.add_field(name="Exploration", value=f"{pet['exploration']}/100", inline=True)
-        await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="collect", description="Collect your pet and loot after an expedition")
     async def collect(self, interaction: discord.Interaction):
@@ -339,7 +516,7 @@ class Expedition(commands.Cog):
 
         embed = discord.Embed(
             title=f"📦 {pet_name} returned from expedition!",
-            description=f"{emoji} **{exp['duration_hrs']}-hour expedition** complete!",
+            description=f"{emoji} **{fmt_dur(exp['duration_hrs'])} expedition** complete!",
             color=color
         )
 

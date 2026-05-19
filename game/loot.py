@@ -54,10 +54,10 @@ LEGENDARY_LOOT = [
 # ── Rarity weights per slot (non-guaranteed rolls) ────────────────────────────
 #   [common, uncommon, rare, very_rare, legendary]
 SLOT_WEIGHTS = {
-    1:  [85, 15,  0,  0,  0],
-    6:  [60, 32,  7,  1,  0],
-    12: [45, 30, 20,  5,  0],
-    24: [30, 25, 35,  0, 10],   # legendary 10% on 24hr
+    0.5: [90, 10,  0,  0,  0],
+    1.5: [68, 26,  5,  1,  0],
+    4:   [45, 33, 18,  4,  0],
+    6:   [28, 30, 30,  8,  4],   # legendary 4% on 6hr (only if exploration >= 100)
 }
 
 TABLE_MAP = {
@@ -79,8 +79,8 @@ COIN_RANGES = {
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _roll_rarity(duration_hrs: int) -> str:
-    weights = SLOT_WEIGHTS.get(duration_hrs, SLOT_WEIGHTS[6])
+def _roll_rarity(duration_hrs: float) -> str:
+    weights = SLOT_WEIGHTS.get(duration_hrs, SLOT_WEIGHTS[1.5])
     return random.choices(RARITIES, weights=weights, k=1)[0]
 
 
@@ -104,21 +104,21 @@ def _pick_from(table: list, pet_element: str) -> dict:
 
 # ── Main generator ────────────────────────────────────────────────────────────
 
-def generate_expedition_loot(duration_hrs: int, pet_element: str, exploration: int) -> list[dict]:
-    # 5–10 items depending on duration
-    count_ranges = {1: (5, 7), 6: (6, 8), 12: (7, 9), 24: (8, 10)}
-    lo, hi = count_ranges.get(duration_hrs, (5, 7))
+def generate_expedition_loot(duration_hrs: float, pet_element: str, exploration: int) -> list[dict]:
+    # 3–8 items depending on duration
+    count_ranges = {0.5: (3, 4), 1.5: (4, 5), 4: (5, 7), 6: (6, 8)}
+    lo, hi = count_ranges.get(duration_hrs, (3, 5))
     count = random.randint(lo, hi)
 
     results = []
 
     # Guaranteed slots by duration
-    if duration_hrs >= 6:
+    if duration_hrs >= 1.5:
         results.append(_pick_from(UNCOMMON_LOOT, pet_element))
-    if duration_hrs >= 12:
+    if duration_hrs >= 4:
         results.append(_pick_from(RARE_LOOT, pet_element))
-    if duration_hrs >= 24:
-        results.append(_pick_from(RARE_LOOT, pet_element))  # 2nd guaranteed rare at 24hr
+    if duration_hrs >= 6:
+        results.append(_pick_from(RARE_LOOT, pet_element))  # 2nd guaranteed rare at 6hr
 
     # Fill remaining slots with random rolls
     for _ in range(count - len(results)):
@@ -131,10 +131,10 @@ def generate_expedition_loot(duration_hrs: int, pet_element: str, exploration: i
     return results
 
 
-def generate_scroll_drop(duration_hrs: int, pet_element: str) -> dict | None:
+def generate_scroll_drop(duration_hrs: float, pet_element: str) -> dict | None:
     """Chance to drop a skill scroll. Element is one the pet's element can learn."""
     from game.skills import SKILL_COMPATIBILITY
-    chance = {1: 0.08, 6: 0.20, 12: 0.38, 24: 0.60}
+    chance = {0.5: 0.05, 1.5: 0.12, 4: 0.28, 6: 0.50}
     if random.random() > chance.get(duration_hrs, 0.08):
         return None
     rarity = random.choices(
@@ -153,19 +153,19 @@ def generate_scroll_drop(duration_hrs: int, pet_element: str) -> dict | None:
     return {"skill_key": skill_key, "rarity": rarity, "name": skill["name"], "element": skill["element"]}
 
 
-def generate_armor_drop(duration_hrs: int) -> dict | None:
+def generate_armor_drop(duration_hrs: float) -> dict | None:
     """Chance to drop one piece of armor based on expedition duration."""
-    chance = {1: 0.10, 6: 0.25, 12: 0.45, 24: 0.70}
+    chance = {0.5: 0.05, 1.5: 0.15, 4: 0.38, 6: 0.60}
     if random.random() > chance.get(duration_hrs, 0.10):
         return None
     # Pick rarity weighted by duration
     rarity_weights = {
-        1:  {"common": 80, "uncommon": 18, "rare": 2,  "legendary": 0},
-        6:  {"common": 55, "uncommon": 35, "rare": 9,  "legendary": 1},
-        12: {"common": 30, "uncommon": 40, "rare": 25, "legendary": 5},
-        24: {"common": 10, "uncommon": 30, "rare": 45, "legendary": 15},
+        0.5: {"common": 88, "uncommon": 11, "rare": 1,  "legendary": 0},
+        1.5: {"common": 60, "uncommon": 35, "rare": 5,  "legendary": 0},
+        4:   {"common": 30, "uncommon": 45, "rare": 23, "legendary": 2},
+        6:   {"common": 10, "uncommon": 30, "rare": 45, "legendary": 15},
     }
-    w = rarity_weights.get(duration_hrs, rarity_weights[6])
+    w = rarity_weights.get(duration_hrs, rarity_weights[1.5])
     rarity = random.choices(list(w.keys()), weights=list(w.values()), k=1)[0]
     pool = ARMOR_BY_RARITY.get(rarity, ARMOR_BY_RARITY["common"])
     name = random.choice(pool)

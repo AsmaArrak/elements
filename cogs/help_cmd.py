@@ -39,10 +39,13 @@ class Help(commands.Cog):
         embed.add_field(
             name="🗺️ Expeditions",
             value=(
-                "`/expedition <1/6/12/24>` — Send your pet out for loot\n"
-                "`/expedition status` — Check how long until return\n"
-                "`/collect` — Collect your pet and loot when it returns\n"
-                "*Longer expeditions = more items + better rarity (up to 10 items on 24hr)*"
+                "`/expedition 30m` — Quick 30-minute run (light loot)\n"
+                "`/expedition 1h30` — 1.5-hour expedition\n"
+                "`/expedition 4h` — 4-hour expedition\n"
+                "`/expedition 6h` — Best loot, highest rarity chance\n"
+                "`/expedition status` — Check all active expeditions\n"
+                "`/expedition cancel` — Recall a pet early *(no loot)*\n"
+                "`/collect` — Collect your pet and loot when it returns"
             ),
             inline=False
         )
@@ -113,7 +116,7 @@ class Help(commands.Cog):
             ),
             inline=False
         )
-        embed.set_footer(text="Evo Stones drop from expeditions and channel drops. Mega Stones only from expeditions!")
+        embed.set_footer(text="Evo Stones drop from expeditions and channel drops. Mega Stones only from 4h+ expeditions with Exploration 100!")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
