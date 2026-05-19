@@ -6,57 +6,90 @@ import aiosqlite
 
 import database as db
 from config import (ELEMENTS, ELEMENT_DISPLAY, ELEMENT_EMOJIS, ELEMENT_COLORS,
-                    BASE_STATS, STAGE_MULTIPLIERS, PET_NAMES, get_pet_image)
+                    PET_NAMES, get_pet_image, FOOD_ITEMS)
 from game.stats import calc_base_stats
 
+ELEMENT_DESCRIPTIONS = {
+    "void":    "Darkness consuming light\n⭐ High MGK · Low DEF",
+    "ember":   "Eternal spirit fire\n⭐ High ATK & MGK",
+    "storm":   "Thunder made flesh\n⭐ Fastest of all elements",
+    "bloom":   "Ancient life, wild growth\n⭐ High HP & RES",
+    "crystal": "Prismatic hard brilliance\n⭐ Highest DEF & RES",
+    "cosmic":  "Born from dying stars\n⭐ Balanced & mystical",
+    "toxin":   "Beautiful decay\n⭐ Devastating magic power",
+    "forge":   "Iron and fire, built not born\n⭐ Heavy ATK & DEF",
+    "phantom": "Between worlds\n⭐ High SPD & MGK",
+    "tide":    "Deep ocean patience\n⭐ Tanky & resilient",
+}
 
-class ElementSelect(discord.ui.Select):
+
+class EggBrowserView(discord.ui.View):
     def __init__(self, user_id: int):
+        super().__init__(timeout=120)
         self.user_id = user_id
-        options = [
-            discord.SelectOption(
-                label=f"{ELEMENT_EMOJIS[e]} {ELEMENT_DISPLAY[e]}",
-                value=e,
-                description={
-                    "void": "Darkness consuming light — high magic",
-                    "ember": "Eternal spirit fire — high attack & magic",
-                    "storm": "Thunder made flesh — fastest of all",
-                    "bloom": "Ancient life — high HP & resistance",
-                    "crystal": "Prismatic brilliance — high defense",
-                    "cosmic": "Born from dying stars — balanced & mystical",
-                    "toxin": "Beautiful decay — devastating magic",
-                    "forge": "Iron and fire — heavy hitter, iron defense",
-                    "phantom": "Between worlds — fast & magical",
-                    "tide": "Deep ocean patience — tanky & resilient",
-                }[e]
-            )
-            for e in ELEMENTS
-        ]
-        super().__init__(placeholder="Choose your element...", options=options, min_values=1, max_values=1)
+        self.current_idx = 0
 
-    async def callback(self, interaction: discord.Interaction):
+    def current_element(self) -> str:
+        return ELEMENTS[self.current_idx]
+
+    def build_embed(self) -> discord.Embed:
+        element = self.current_element()
+        display = ELEMENT_DISPLAY[element]
+        emoji = ELEMENT_EMOJIS[element]
+        color = ELEMENT_COLORS[element]
+        desc = ELEMENT_DESCRIPTIONS[element]
+        embed = discord.Embed(
+            title=f"{emoji} {display} Egg",
+            description=(
+                f"{desc}\n\n"
+                f"*Browse with ◀ ▶ then click **Choose** to pick this egg.*\n\n"
+                f"**{self.current_idx + 1} / {len(ELEMENTS)}**"
+            ),
+            color=color
+        )
+        embed.set_image(url="attachment://egg.png")
+        embed.set_footer(text="Your element is permanent — choose wisely!")
+        return embed
+
+    def get_file(self) -> discord.File:
+        path = get_pet_image(self.current_element(), 1, 0)
+        return discord.File(path, filename="egg.png")
+
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary, row=0)
+    async def prev_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This isn't your selection!", ephemeral=True)
+            return
+        self.current_idx = (self.current_idx - 1) % len(ELEMENTS)
+        await interaction.response.edit_message(
+            embed=self.build_embed(), attachments=[self.get_file()], view=self
+        )
+
+    @discord.ui.button(label="✅ Choose this egg", style=discord.ButtonStyle.success, row=0)
+    async def choose_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("This isn't your selection!", ephemeral=True)
             return
         await interaction.response.defer()
-        element = self.values[0]
-        await self.view.on_element_chosen(interaction, element)
+        await self.on_element_chosen(interaction, self.current_element())
 
-
-class StartView(discord.ui.View):
-    def __init__(self, user_id: int):
-        super().__init__(timeout=60)
-        self.user_id = user_id
-        self.add_item(ElementSelect(user_id))
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary, row=0)
+    async def next_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This isn't your selection!", ephemeral=True)
+            return
+        self.current_idx = (self.current_idx + 1) % len(ELEMENTS)
+        await interaction.response.edit_message(
+            embed=self.build_embed(), attachments=[self.get_file()], view=self
+        )
 
     async def on_element_chosen(self, interaction: discord.Interaction, element: str):
         self.stop()
         variant = random.randint(1, 2)
 
         async with aiosqlite.connect(db.DB_PATH) as conn:
-            player = await db.get_player(conn, interaction.user.id)
-
-            bases = calc_base_stats(element, 0)  # egg stats
+            await db.ensure_player(conn, interaction.user.id)
+            bases = calc_base_stats(element, 0)
             await conn.execute(
                 """INSERT INTO pets
                    (player_id, element, variant, stage, level, xp,
@@ -67,37 +100,36 @@ class StartView(discord.ui.View):
                  bases["spd"], bases["mgk"], bases["res"])
             )
             await conn.commit()
-
-            async with conn.execute(
-                "SELECT last_insert_rowid()"
-            ) as cur:
+            async with conn.execute("SELECT last_insert_rowid()") as cur:
                 pet_id = (await cur.fetchone())[0]
-
             await conn.execute(
                 "UPDATE players SET active_pet=? WHERE user_id=?",
                 (pet_id, interaction.user.id)
             )
+            # Give 1 starting food item
+            starting_food = random.choice(["apple", "bread", "carrot", "cheese", "grape"])
+            await db.add_item(conn, interaction.user.id, starting_food, "food", 1)
             await conn.commit()
 
         egg_name = PET_NAMES[element][variant][0]
         color = ELEMENT_COLORS[element]
         emoji = ELEMENT_EMOJIS[element]
         display = ELEMENT_DISPLAY[element]
+        food_display = FOOD_ITEMS[starting_food]["display"]
 
-        image_path = get_pet_image(element, variant, 0)
-        file = discord.File(image_path, filename="pet.png")
-
+        file = discord.File(get_pet_image(element, variant, 0), filename="egg.png")
         embed = discord.Embed(
             title=f"{emoji} Your {display} Egg has appeared!",
             description=(
                 f"**{egg_name}** is waiting for you.\n\n"
-                "🥚 Give it its **first meal** with `/feed` to hatch it!\n"
-                "The moment you feed it for the first time, it will evolve into its first form."
+                f"🎁 You received a **{food_display}** to get started!\n\n"
+                f"🥚 Feed your egg **3 times** with `/feed` to hatch it!\n"
+                f"Each feeding brings it closer to life."
             ),
             color=color
         )
-        embed.set_image(url="attachment://pet.png")
-        embed.set_footer(text=f"Element: {display} | Variant: {variant}")
+        embed.set_image(url="attachment://egg.png")
+        embed.set_footer(text=f"Element: {display} | Use /feed to begin!")
 
         await interaction.followup.edit_message(
             interaction.message.id,
@@ -115,7 +147,7 @@ class Start(commands.Cog):
     @app_commands.command(name="start", description="Begin your Elementals journey and choose your egg!")
     async def start(self, interaction: discord.Interaction):
         async with aiosqlite.connect(db.DB_PATH) as conn:
-            player = await db.ensure_player(conn, interaction.user.id)
+            await db.ensure_player(conn, interaction.user.id)
             pets = await db.get_player_pets(conn, interaction.user.id)
 
         if pets:
@@ -124,24 +156,10 @@ class Start(commands.Cog):
             )
             return
 
-        embed = discord.Embed(
-            title="✨ Welcome to Elementals!",
-            description=(
-                "Choose your element below. Your egg's element is **permanent** — choose wisely!\n\n"
-                "Each element has unique strengths and a different evolution path.\n"
-                "Both variants you might receive are the **same element** — just different creatures."
-            ),
-            color=0x7B68EE
-        )
-        embed.set_thumbnail(url="attachment://logo.png")
-
-        try:
-            logo_file = discord.File("logo.png", filename="logo.png")
-            view = StartView(interaction.user.id)
-            await interaction.response.send_message(embed=embed, view=view, file=logo_file)
-        except FileNotFoundError:
-            view = StartView(interaction.user.id)
-            await interaction.response.send_message(embed=embed, view=view)
+        view = EggBrowserView(interaction.user.id)
+        file = view.get_file()
+        embed = view.build_embed()
+        await interaction.response.send_message(embed=embed, view=view, file=file)
 
 
 async def setup(bot: commands.Bot):

@@ -51,9 +51,12 @@ def pet_embed(pet: dict, owner: discord.User | discord.Member = None) -> tuple[d
             inline=False
         )
     else:
+        feed_count = pet.get("first_fed", 0)
+        remaining = 3 - feed_count
+        dots = "🟡" * feed_count + "⚪" * remaining
         embed.add_field(
             name="🥚 Egg",
-            value="Feed your egg for the first time to hatch it!",
+            value=f"Feed it **{remaining} more time(s)** to hatch!\n{dots} ({feed_count}/3 feedings)",
             inline=False
         )
 
@@ -205,12 +208,12 @@ class Pet(commands.Cog):
             stat_key = food["stat"]
             boost = food["boost"]
             xp_gain = food["xp"]
-            first_feed = pet["first_fed"] == 0
+            feed_count = pet["first_fed"]  # 0, 1, 2 = egg feeding progress; 3+ = hatched
 
             # Remove food from inventory
             await db.remove_item(conn, interaction.user.id, item)
 
-            # Apply stat bonus
+            # Apply stat bonus (even to eggs — bonus carries over on hatch)
             actual_boost, was_capped = apply_stat_bonus(pet, stat_key, boost)
             if actual_boost > 0:
                 await conn.execute(
@@ -220,19 +223,23 @@ class Pet(commands.Cog):
 
             evolved = False
             evo_message = ""
+            new_feed_count = feed_count + 1
 
-            if first_feed:
-                # First feeding — evolve from egg to Evo 1
-                await conn.execute("UPDATE pets SET first_fed=1 WHERE id=?", (pet["id"],))
-                await evolve_pet(conn, pet, 1)
-                evolved = True
-                evo_name = PET_NAMES[pet["element"]][pet["variant"]][1]
-                evo_message = (
-                    f"\n\n🌟 **HATCHED!** Your egg burst open and **{evo_name}** emerged!\n"
-                    "Your journey has truly begun!"
+            if pet["stage"] == 0:
+                # Egg phase — needs 3 feedings to hatch
+                await conn.execute(
+                    "UPDATE pets SET first_fed=? WHERE id=?", (new_feed_count, pet["id"])
                 )
-                # Refresh pet data
-                pet = await db.get_pet(conn, pet["id"])
+                if new_feed_count >= 3:
+                    # Hatch!
+                    await evolve_pet(conn, pet, 1)
+                    evolved = True
+                    evo_name = PET_NAMES[pet["element"]][pet["variant"]][1]
+                    evo_message = (
+                        f"🌟 **HATCHED!** Your egg burst open and **{evo_name}** emerged!\n"
+                        "Your journey has truly begun!"
+                    )
+                    pet = await db.get_pet(conn, pet["id"])
                 await db.add_xp(conn, pet["id"], xp_gain)
             else:
                 await db.add_xp(conn, pet["id"], xp_gain)
@@ -255,29 +262,43 @@ class Pet(commands.Cog):
         except FileNotFoundError:
             has_img = False
 
-        embed = discord.Embed(
-            title=f"🍽️ {name} ate {food_display}!",
-            color=color
-        )
+        embed = discord.Embed(color=color)
         stat_line = f"+{actual_boost} {stat_display}" if actual_boost > 0 else f"{stat_display} is at cap!"
         cap_note = " *(stat capped)*" if was_capped and actual_boost == 0 else ""
-        embed.add_field(name="Stat Boost", value=f"{stat_line}{cap_note}", inline=True)
-        embed.add_field(name="XP Gained", value=f"+{xp_gain} XP", inline=True)
 
-        lvl_after = pet["level"]
-        xp_after = pet["xp"]
-        embed.add_field(
-            name="Level", value=f"Level {lvl_after} | {xp_after}/{xp_for_next_level(lvl_after)} XP",
-            inline=False
-        )
-
-        if evo_message:
+        if evolved:
+            embed.title = f"🌟 {name} hatched!"
             embed.description = evo_message
             if has_img:
                 embed.set_image(url="attachment://img.png")
+        elif pet["stage"] == 0:
+            # Still an egg
+            remaining = 3 - new_feed_count
+            dots = "🟡" * new_feed_count + "⚪" * remaining
+            embed.title = f"🥚 Your egg enjoyed the meal!"
+            embed.description = f"{dots} **{new_feed_count}/3 feedings** — {remaining} more to hatch!"
+            food_file_path = get_food_image(item)
+            try:
+                file = discord.File(food_file_path, filename="img.png")
+                has_img = True
+                embed.set_thumbnail(url="attachment://img.png")
+            except FileNotFoundError:
+                has_img = False
+        else:
+            embed.title = f"🍽️ {name} ate {food_display}!"
+            if has_img:
+                embed.set_thumbnail(url="attachment://img.png")
 
-        if has_img and not evo_message:
-            embed.set_thumbnail(url="attachment://img.png")
+        embed.add_field(name="Stat Boost", value=f"{stat_line}{cap_note}", inline=True)
+        embed.add_field(name="XP Gained", value=f"+{xp_gain} XP", inline=True)
+
+        if pet["stage"] > 0:
+            lvl_after = pet["level"]
+            xp_after = pet["xp"]
+            embed.add_field(
+                name="Level", value=f"Level {lvl_after} | {xp_after}/{xp_for_next_level(lvl_after)} XP",
+                inline=False
+            )
 
         if has_img:
             await interaction.response.send_message(embed=embed, file=file)
@@ -351,9 +372,9 @@ class Pet(commands.Cog):
         embed.set_footer(text="Training resets every 20 hours.")
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="nickname", description="Give your active pet a custom nickname")
-    @app_commands.describe(name="The nickname (leave empty to clear it)")
-    async def nickname(self, interaction: discord.Interaction, name: str = ""):
+    @app_commands.command(name="rename", description="Give your active pet a custom name")
+    @app_commands.describe(name="The new name (leave empty to reset to default)")
+    async def rename(self, interaction: discord.Interaction, name: str = ""):
         async with aiosqlite.connect(db.DB_PATH) as conn:
             player = await db.get_player(conn, interaction.user.id)
             if not player:
