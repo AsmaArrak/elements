@@ -1,5 +1,5 @@
 import random
-from config import ELEMENTS
+from config import ELEMENTS, ARMOR_BY_RARITY, ARMOR_POOL
 
 # ── Loot tables ───────────────────────────────────────────────────────────────
 
@@ -128,6 +128,25 @@ def generate_expedition_loot(duration_hrs: int, pet_element: str, exploration: i
         results.append(_pick_from(TABLE_MAP[rarity], pet_element))
 
     return results
+
+
+def generate_armor_drop(duration_hrs: int) -> dict | None:
+    """Chance to drop one piece of armor based on expedition duration."""
+    chance = {1: 0.10, 6: 0.25, 12: 0.45, 24: 0.70}
+    if random.random() > chance.get(duration_hrs, 0.10):
+        return None
+    # Pick rarity weighted by duration
+    rarity_weights = {
+        1:  {"common": 80, "uncommon": 18, "rare": 2,  "legendary": 0},
+        6:  {"common": 55, "uncommon": 35, "rare": 9,  "legendary": 1},
+        12: {"common": 30, "uncommon": 40, "rare": 25, "legendary": 5},
+        24: {"common": 10, "uncommon": 30, "rare": 45, "legendary": 15},
+    }
+    w = rarity_weights.get(duration_hrs, rarity_weights[6])
+    rarity = random.choices(list(w.keys()), weights=list(w.values()), k=1)[0]
+    pool = ARMOR_BY_RARITY.get(rarity, ARMOR_BY_RARITY["common"])
+    name = random.choice(pool)
+    return {"name": name, "rarity": rarity, **{k: v for k, v in ARMOR_POOL[name].items() if k != "rarity"}}
 
 
 # ── Channel drops ─────────────────────────────────────────────────────────────

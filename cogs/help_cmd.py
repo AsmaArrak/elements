@@ -41,7 +41,17 @@ class Help(commands.Cog):
             value=(
                 "`/expedition <1/6/12/24>` — Send your pet out for loot\n"
                 "`/expedition status` — Check how long until return\n"
-                "`/collect` — Collect your pet and loot when it returns"
+                "`/collect` — Collect your pet and loot when it returns\n"
+                "*Longer expeditions = more items + better rarity (up to 10 items on 24hr)*"
+            ),
+            inline=False
+        )
+        embed.add_field(
+            name="🛡️ Armor",
+            value=(
+                "`/armor` — View your armor collection\n"
+                "`/equip` — Equip armor to a pet (shown in `/pet`)\n"
+                "`/sellarmor <id>` — Sell a piece of armor for coins"
             ),
             inline=False
         )
@@ -70,11 +80,16 @@ class Help(commands.Cog):
         embed.add_field(
             name="🎮 Minigames",
             value=(
-                "`/fish` — Cast a line for coins & items (30min cooldown)\n"
-                "`/dig` — Excavate for buried treasure (45min cooldown)\n"
-                "`/trivia` — Answer a question to win coins\n"
+                "`/fish` — Cast a line for coins & items (10min cooldown)\n"
+                "`/dig` — Excavate for buried treasure (10min cooldown)\n"
+                "`/trivia` — Answer a question to win coins (2min cooldown)\n"
                 "`/leaderboard` — See the top pets on the server"
             ),
+            inline=False
+        )
+        embed.add_field(
+            name="🎯 Party",
+            value="`/setparty` — Set your battle party order (first pet starts battles)",
             inline=False
         )
         embed.add_field(

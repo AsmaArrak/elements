@@ -24,6 +24,7 @@ COGS = [
     "cogs.drops",
     "cogs.minigames",
     "cogs.party",
+    "cogs.armor",
 ]
 
 

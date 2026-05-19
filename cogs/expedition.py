@@ -9,7 +9,7 @@ from config import (
     ELEMENT_DISPLAY, ELEMENT_EMOJIS, ELEMENT_COLORS, PET_NAMES, STAGE_NAMES,
     FOOD_ITEMS, STAT_ITEMS, EXPEDITION_XP, EXPLORATION_GAIN, get_pet_image
 )
-from game.loot import generate_expedition_loot
+from game.loot import generate_expedition_loot, generate_armor_drop
 
 
 VALID_DURATIONS = {1, 6, 12, 24}
@@ -305,6 +305,19 @@ class Expedition(commands.Cog):
                 "UPDATE pets SET exploration=? WHERE id=?", (new_exploration, pet["id"])
             )
 
+            # Armor drop
+            armor_drop = generate_armor_drop(exp["duration_hrs"])
+            if armor_drop:
+                await conn.execute(
+                    """INSERT INTO armor_inventory
+                       (player_id, name, rarity, bonus_hp, bonus_atk, bonus_def, bonus_spd, bonus_mgk, bonus_res)
+                       VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (interaction.user.id, armor_drop["name"], armor_drop["rarity"],
+                     armor_drop.get("bonus_hp", 0), armor_drop.get("bonus_atk", 0),
+                     armor_drop.get("bonus_def", 0), armor_drop.get("bonus_spd", 0),
+                     armor_drop.get("bonus_mgk", 0), armor_drop.get("bonus_res", 0))
+                )
+
             # Mark expedition returned
             await conn.execute(
                 "UPDATE expeditions SET returned=1 WHERE id=?", (exp["id"],)
@@ -333,6 +346,10 @@ class Expedition(commands.Cog):
                 mega_found = True
         if coin_total:
             loot_lines.append(f"• **{coin_total} coins** 💰")
+        if armor_drop:
+            from config import RARITY_EMOJIS
+            r_emoji = RARITY_EMOJIS.get(armor_drop["rarity"], "")
+            loot_lines.append(f"• {r_emoji} **{armor_drop['name']}** *(armor)*")
 
         embed.add_field(
             name="🎒 Loot Found",

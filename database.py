@@ -104,8 +104,27 @@ async def init_db():
         """)
         await db.commit()
         # Migrations
+        # Armor table
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS armor_inventory (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                player_id  INTEGER NOT NULL,
+                name       TEXT NOT NULL,
+                rarity     TEXT NOT NULL,
+                bonus_hp   INTEGER DEFAULT 0,
+                bonus_atk  INTEGER DEFAULT 0,
+                bonus_def  INTEGER DEFAULT 0,
+                bonus_spd  INTEGER DEFAULT 0,
+                bonus_mgk  INTEGER DEFAULT 0,
+                bonus_res  INTEGER DEFAULT 0,
+                FOREIGN KEY (player_id) REFERENCES players(user_id)
+            )
+        """)
+        await db.commit()
+        # Column migrations
         for col_sql in [
             "ALTER TABLE players ADD COLUMN last_trivia TEXT",
+            "ALTER TABLE pets ADD COLUMN equipped_armor INTEGER DEFAULT NULL",
         ]:
             try:
                 await db.execute(col_sql)

@@ -398,6 +398,31 @@ class Pet(commands.Cog):
             inline=False
         )
 
+        # Equipped armor
+        armor_id = pet.get("equipped_armor")
+        if armor_id:
+            async with aiosqlite.connect(db.DB_PATH) as conn:
+                async with conn.execute(
+                    "SELECT name, rarity, bonus_hp, bonus_atk, bonus_def, bonus_spd, bonus_mgk, bonus_res FROM armor_inventory WHERE id=?",
+                    (armor_id,)
+                ) as cur:
+                    ar = await cur.fetchone()
+            if ar:
+                from config import RARITY_EMOJIS
+                r_emoji = RARITY_EMOJIS.get(ar[1], "")
+                bonuses = []
+                labels = [("HP", ar[2]), ("ATK", ar[3]), ("DEF", ar[4]), ("SPD", ar[5]), ("MGK", ar[6]), ("RES", ar[7])]
+                for stat, val in labels:
+                    if val:
+                        bonuses.append(f"+{val} {stat}")
+                embed.add_field(
+                    name="🛡️ Equipped Armor",
+                    value=f"{r_emoji} **{ar[0]}** *({ar[1]})*\n{' · '.join(bonuses)}",
+                    inline=False
+                )
+        else:
+            embed.add_field(name="🛡️ Equipped Armor", value="*None — use `/equip` to equip armor*", inline=False)
+
         image_path = get_pet_image(element, variant, stage)
         file = discord.File(image_path, filename="pet.png")
         embed.set_thumbnail(url="attachment://pet.png")

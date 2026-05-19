@@ -176,6 +176,45 @@ STAT_ITEMS = {
     "life_crystal":   {"stat": "hp",  "boost": 20, "display": "Life Crystal 💠"},
 }
 
+# ── Armor ─────────────────────────────────────────────────────────────────────
+# name → {rarity, stat bonuses}
+ARMOR_POOL = {
+    # Common
+    "Leather Helm":     {"rarity": "common",    "bonus_def": 5,  "bonus_hp": 8},
+    "Cloth Vest":       {"rarity": "common",    "bonus_hp": 12,  "bonus_res": 3},
+    "Light Greaves":    {"rarity": "common",    "bonus_spd": 5,  "bonus_def": 3},
+    "Wooden Shield":    {"rarity": "common",    "bonus_def": 8,  "bonus_res": 4},
+    # Uncommon
+    "Iron Helm":        {"rarity": "uncommon",  "bonus_def": 12, "bonus_hp": 15},
+    "Chain Vest":       {"rarity": "uncommon",  "bonus_hp": 20,  "bonus_def": 8},
+    "Swift Boots":      {"rarity": "uncommon",  "bonus_spd": 12, "bonus_atk": 5},
+    "Battle Gauntlets": {"rarity": "uncommon",  "bonus_atk": 12, "bonus_def": 6},
+    "Mystic Robe":      {"rarity": "uncommon",  "bonus_mgk": 12, "bonus_res": 6},
+    "Runic Bracers":    {"rarity": "uncommon",  "bonus_mgk": 10, "bonus_spd": 5},
+    # Rare
+    "Dragon Helm":      {"rarity": "rare",      "bonus_def": 22, "bonus_hp": 25, "bonus_res": 8},
+    "Titan Plate":      {"rarity": "rare",      "bonus_hp": 35,  "bonus_def": 18, "bonus_atk": 8},
+    "Phantom Cloak":    {"rarity": "rare",      "bonus_spd": 20, "bonus_mgk": 12, "bonus_res": 10},
+    "Arcane Mantle":    {"rarity": "rare",      "bonus_mgk": 22, "bonus_res": 15, "bonus_hp": 15},
+    "Warlord Armor":    {"rarity": "rare",      "bonus_atk": 22, "bonus_def": 15, "bonus_spd": 8},
+    # Legendary
+    "Celestial Crown":  {"rarity": "legendary", "bonus_hp": 40,  "bonus_mgk": 25, "bonus_res": 20, "bonus_def": 15},
+    "Void Aegis":       {"rarity": "legendary", "bonus_def": 35, "bonus_hp": 30,  "bonus_res": 25, "bonus_spd": 10},
+    "Storm Regalia":    {"rarity": "legendary", "bonus_atk": 30, "bonus_mgk": 25, "bonus_spd": 20, "bonus_hp": 20},
+    "Bloom Sanctuary":  {"rarity": "legendary", "bonus_hp": 50,  "bonus_res": 30, "bonus_def": 20, "bonus_mgk": 15},
+}
+
+ARMOR_BY_RARITY = {
+    "common":    [k for k, v in ARMOR_POOL.items() if v["rarity"] == "common"],
+    "uncommon":  [k for k, v in ARMOR_POOL.items() if v["rarity"] == "uncommon"],
+    "rare":      [k for k, v in ARMOR_POOL.items() if v["rarity"] == "rare"],
+    "legendary": [k for k, v in ARMOR_POOL.items() if v["rarity"] == "legendary"],
+}
+
+RARITY_EMOJIS = {
+    "common": "⚪", "uncommon": "🟢", "rare": "🔵", "legendary": "🟡"
+}
+
 # Passive XP per hour (background task)
 PASSIVE_XP_PER_HOUR = 5
 
