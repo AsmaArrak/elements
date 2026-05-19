@@ -267,6 +267,37 @@ class FoodSelect(discord.ui.Select):
         await interaction.response.defer()
 
 
+class PetViewSelect(discord.ui.View):
+    def __init__(self, user_id: int, pets: list[dict]):
+        super().__init__(timeout=60)
+        self.user_id = user_id
+        self.pets_by_id = {str(p["id"]): p for p in pets}
+        options = []
+        for p in pets:
+            name = p.get("nickname") or PET_NAMES[p["element"]][p["variant"]][p["stage"]]
+            emoji = ELEMENT_EMOJIS[p["element"]]
+            stage_label = STAGE_NAMES[p["stage"]]
+            options.append(discord.SelectOption(
+                label=name,
+                value=str(p["id"]),
+                description=f"Level {p['level']} · {stage_label}",
+                emoji=emoji
+            ))
+        select = discord.ui.Select(placeholder="Choose a pet to inspect...", options=options)
+        select.callback = self._callback
+        self.add_item(select)
+
+    async def _callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your menu!", ephemeral=True)
+            return
+        pet = self.pets_by_id[interaction.data["values"][0]]
+        self.stop()
+        await interaction.response.defer()
+        pet_cog = interaction.client.get_cog("Pet")
+        await pet_cog._send_pet_stats(interaction, pet, followup=True)
+
+
 class Pet(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -306,11 +337,24 @@ class Pet(commands.Cog):
             if not player:
                 await interaction.response.send_message("Use `/start` first.", ephemeral=True)
                 return
-            pet = await db.get_active_pet(conn, interaction.user.id)
-            if not pet:
-                await interaction.response.send_message("No active pet found.", ephemeral=True)
-                return
+            pets = await db.get_player_pets(conn, interaction.user.id)
+            hatched = [p for p in pets if p["stage"] > 0]
 
+        if not pets:
+            await interaction.response.send_message("No active pet found.", ephemeral=True)
+            return
+
+        if len(pets) > 1:
+            view = PetViewSelect(interaction.user.id, pets)
+            await interaction.response.send_message(
+                "Which pet would you like to inspect?", view=view, ephemeral=True
+            )
+            return
+
+        await self._send_pet_stats(interaction, pets[0])
+
+    async def _send_pet_stats(self, interaction: discord.Interaction, pet: dict, followup: bool = False):
+        from config import stat_cap
         element = pet["element"]
         variant = pet["variant"]
         stage = pet["stage"]
@@ -321,10 +365,7 @@ class Pet(commands.Cog):
 
         stats = effective_stats(pet)
 
-        embed = discord.Embed(
-            title=f"{emoji} {name} — Full Stats",
-            color=color
-        )
+        embed = discord.Embed(title=f"{emoji} {name} — Full Stats", color=color)
 
         embed.add_field(
             name="Base Stats",
@@ -349,11 +390,9 @@ class Pet(commands.Cog):
         embed.add_field(name="Level", value=f"{level}/100", inline=True)
         embed.add_field(name="Exploration", value=f"{pet['exploration']}/100", inline=True)
 
-        # Stat caps info
-        from config import stat_cap
         cap_hp = stat_cap(pet["base_hp"], level)
         embed.add_field(
-            name="📊 Stat Caps (at level " + str(level) + ")",
+            name=f"📊 Stat Caps (at level {level})",
             value=(
                 f"HP cap: **{cap_hp}** | Room: +{cap_hp - (pet['base_hp'] + pet['bonus_hp'])}\n"
                 f"ATK cap: **{stat_cap(pet['base_atk'], level)}** | "
@@ -365,7 +404,10 @@ class Pet(commands.Cog):
         image_path = get_pet_image(element, variant, stage)
         file = discord.File(image_path, filename="pet.png")
         embed.set_thumbnail(url="attachment://pet.png")
-        await interaction.response.send_message(embed=embed, file=file)
+        if followup:
+            await interaction.followup.send(embed=embed, file=file, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=embed, file=file)
 
     @app_commands.command(name="feed", description="Choose a pet and food item to feed from your inventory")
     async def feed(self, interaction: discord.Interaction):
