@@ -73,6 +73,200 @@ def pet_embed(pet: dict, owner: discord.User | discord.Member = None) -> tuple[d
     return embed, file
 
 
+async def do_feed(pet: dict, item_key: str, user_id: int, channel) -> tuple[discord.Embed, discord.File | None]:
+    """Core feeding logic. Returns (embed, optional file)."""
+    async with aiosqlite.connect(db.DB_PATH) as conn:
+        # Re-fetch fresh pet state
+        pet = await db.get_pet(conn, pet["id"])
+        food = FOOD_ITEMS[item_key]
+        stat_key = food["stat"]
+        boost = food["boost"]
+        xp_gain = food["xp"]
+        feed_count = pet["first_fed"]
+
+        await db.remove_item(conn, user_id, item_key)
+
+        actual_boost, was_capped = apply_stat_bonus(pet, stat_key, boost)
+        if actual_boost > 0:
+            await conn.execute(
+                f"UPDATE pets SET bonus_{stat_key}=bonus_{stat_key}+? WHERE id=?",
+                (actual_boost, pet["id"])
+            )
+
+        evolved = False
+        evo_message = ""
+        new_feed_count = feed_count + 1
+
+        if pet["stage"] == 0:
+            await conn.execute(
+                "UPDATE pets SET first_fed=? WHERE id=?", (new_feed_count, pet["id"])
+            )
+            if new_feed_count >= 3:
+                await evolve_pet(conn, pet, 1)
+                evolved = True
+                evo_name = PET_NAMES[pet["element"]][pet["variant"]][1]
+                evo_message = (
+                    f"🌟 **HATCHED!** Your egg burst open and **{evo_name}** emerged!\n"
+                    "Your journey has truly begun!"
+                )
+                pet = await db.get_pet(conn, pet["id"])
+            await db.add_xp(conn, pet["id"], xp_gain)
+        else:
+            await db.add_xp(conn, pet["id"], xp_gain)
+
+        await conn.commit()
+        pet = await db.get_pet(conn, pet["id"])
+
+    food_display = food["display"]
+    stat_display = stat_key.upper()
+    element = pet["element"]
+    variant = pet["variant"]
+    stage = pet["stage"]
+    name = pet.get("nickname") or PET_NAMES[element][variant][stage]
+    color = ELEMENT_COLORS[element]
+    stat_line = f"+{actual_boost} {stat_display}" if actual_boost > 0 else f"{stat_display} is at cap!"
+    cap_note = " *(stat capped)*" if was_capped and actual_boost == 0 else ""
+
+    embed = discord.Embed(color=color)
+    file = None
+
+    if evolved:
+        embed.title = f"🌟 {name} hatched!"
+        embed.description = evo_message
+        try:
+            file = discord.File(get_pet_image(element, variant, stage), filename="img.png")
+            embed.set_image(url="attachment://img.png")
+        except FileNotFoundError:
+            pass
+        if channel:
+            evo_name = PET_NAMES[element][variant][1]
+            emoji = ELEMENT_EMOJIS[element]
+            await channel.send(
+                f"🎉 <@{user_id}>'s egg just hatched! Say hello to **{evo_name}** {emoji}!"
+            )
+    elif pet["stage"] == 0:
+        remaining = 3 - new_feed_count
+        dots = "🟡" * new_feed_count + "⚪" * remaining
+        embed.title = "🥚 Your egg enjoyed the meal!"
+        embed.description = f"{dots} **{new_feed_count}/3 feedings** — {remaining} more to hatch!"
+        try:
+            file = discord.File(get_food_image(item_key), filename="img.png")
+            embed.set_thumbnail(url="attachment://img.png")
+        except FileNotFoundError:
+            pass
+    else:
+        embed.title = f"🍽️ {name} ate {food_display}!"
+        try:
+            file = discord.File(get_food_image(item_key), filename="img.png")
+            embed.set_thumbnail(url="attachment://img.png")
+        except FileNotFoundError:
+            pass
+
+    embed.add_field(name="Stat Boost", value=f"{stat_line}{cap_note}", inline=True)
+    embed.add_field(name="XP Gained", value=f"+{xp_gain} XP", inline=True)
+    if pet["stage"] > 0:
+        embed.add_field(
+            name="Level",
+            value=f"Level {pet['level']} | {pet['xp']}/{xp_for_next_level(pet['level'])} XP",
+            inline=False
+        )
+    return embed, file
+
+
+class FeedView(discord.ui.View):
+    def __init__(self, user_id: int, pets: list[dict], food_inv: list[dict],
+                 original_interaction: discord.Interaction):
+        super().__init__(timeout=60)
+        self.user_id = user_id
+        self.pets = pets
+        self.food_inv = food_inv
+        self.original_interaction = original_interaction
+        self.selected_pet: dict | None = pets[0] if len(pets) == 1 else None
+        self.selected_food: str | None = None
+
+        # Pet select (only show if more than 1 pet)
+        if len(pets) > 1:
+            self.add_item(PetSelect(pets))
+
+        # Food select
+        self.add_item(FoodSelect(food_inv))
+
+    @discord.ui.button(label="🍽️ Feed!", style=discord.ButtonStyle.success, row=2)
+    async def feed_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your menu!", ephemeral=True)
+            return
+        if not self.selected_pet:
+            await interaction.response.send_message("Please select a pet first.", ephemeral=True)
+            return
+        if not self.selected_food:
+            await interaction.response.send_message("Please select a food item first.", ephemeral=True)
+            return
+
+        self.stop()
+        await interaction.response.defer()
+
+        embed, file = await do_feed(
+            self.selected_pet, self.selected_food,
+            self.user_id, interaction.channel
+        )
+        if file:
+            await interaction.followup.send(embed=embed, file=file)
+        else:
+            await interaction.followup.send(embed=embed)
+
+        # Edit the original selection message to show it's done
+        try:
+            await self.original_interaction.edit_original_response(
+                embed=discord.Embed(description="✅ Fed!", color=0x2ECC71), view=None
+            )
+        except Exception:
+            pass
+
+
+class PetSelect(discord.ui.Select):
+    def __init__(self, pets: list[dict]):
+        options = []
+        for p in pets:
+            name = p.get("nickname") or PET_NAMES[p["element"]][p["variant"]][p["stage"]]
+            emoji = ELEMENT_EMOJIS[p["element"]]
+            stage_label = STAGE_NAMES[p["stage"]]
+            options.append(discord.SelectOption(
+                label=name,
+                value=str(p["id"]),
+                description=f"Level {p['level']} · {stage_label}",
+                emoji=emoji
+            ))
+        super().__init__(placeholder="Choose a pet to feed...", options=options, row=0)
+        self.pets_by_id = {str(p["id"]): p for p in pets}
+
+    async def callback(self, interaction: discord.Interaction):
+        self.view.selected_pet = self.pets_by_id[self.values[0]]
+        await interaction.response.defer()
+
+
+class FoodSelect(discord.ui.Select):
+    def __init__(self, food_inv: list[dict]):
+        options = []
+        for item in food_inv:
+            key = item["item_key"]
+            food_data = FOOD_ITEMS.get(key, {})
+            display = food_data.get("display", key.title())
+            stat = food_data.get("stat", "?").upper()
+            boost = food_data.get("boost", 0)
+            qty = item["quantity"]
+            options.append(discord.SelectOption(
+                label=display,
+                value=key,
+                description=f"×{qty} in bag · +{boost} {stat}",
+            ))
+        super().__init__(placeholder="Choose a food to feed...", options=options, row=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        self.view.selected_food = self.values[0]
+        await interaction.response.defer()
+
+
 class Pet(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -173,152 +367,43 @@ class Pet(commands.Cog):
         embed.set_thumbnail(url="attachment://pet.png")
         await interaction.response.send_message(embed=embed, file=file)
 
-    @app_commands.command(name="feed", description="Feed a food item to your active pet")
-    @app_commands.describe(item="The food item to feed (e.g. apple, bread, fish, cake)")
-    async def feed(self, interaction: discord.Interaction, item: str):
-        item = item.lower().strip()
-        if item not in FOOD_ITEMS:
-            await interaction.response.send_message(
-                f"Unknown food: **{item}**. Valid foods: " + ", ".join(FOOD_ITEMS.keys()),
-                ephemeral=True
-            )
-            return
-
+    @app_commands.command(name="feed", description="Choose a pet and food item to feed from your inventory")
+    async def feed(self, interaction: discord.Interaction):
         async with aiosqlite.connect(db.DB_PATH) as conn:
             player = await db.get_player(conn, interaction.user.id)
             if not player:
                 await interaction.response.send_message("Use `/start` first.", ephemeral=True)
                 return
-            pet = await db.get_active_pet(conn, interaction.user.id)
-            if not pet:
-                await interaction.response.send_message("No active pet.", ephemeral=True)
-                return
 
-            # Check expedition lock
+            all_pets = await db.get_player_pets(conn, interaction.user.id)
             exp = await db.get_active_expedition(conn, interaction.user.id)
-            if exp and exp["pet_id"] == pet["id"]:
+            exp_pet_id = exp["pet_id"] if exp else None
+
+            # Pets that can be fed (not on expedition)
+            feedable = [p for p in all_pets if p["id"] != exp_pet_id]
+            if not feedable:
                 await interaction.response.send_message(
-                    "Your pet is on an expedition! It can't be fed right now.", ephemeral=True
+                    "All your pets are on expedition!", ephemeral=True
                 )
                 return
 
-            has_food = await db.has_item(conn, interaction.user.id, item)
-            if not has_food:
+            # Food items in inventory
+            inventory = await db.get_inventory(conn, interaction.user.id)
+            food_inv = [i for i in inventory if i["item_type"] == "food"]
+            if not food_inv:
                 await interaction.response.send_message(
-                    f"You don't have any **{FOOD_ITEMS[item]['display']}** in your inventory.\n"
-                    "Check `/shop` or claim drops with `/claim`!",
+                    "You have no food! Buy some with `/shop` or claim a drop with `/claim`.",
                     ephemeral=True
                 )
                 return
 
-            food = FOOD_ITEMS[item]
-            stat_key = food["stat"]
-            boost = food["boost"]
-            xp_gain = food["xp"]
-            feed_count = pet["first_fed"]  # 0, 1, 2 = egg feeding progress; 3+ = hatched
-
-            # Remove food from inventory
-            await db.remove_item(conn, interaction.user.id, item)
-
-            # Apply stat bonus (even to eggs — bonus carries over on hatch)
-            actual_boost, was_capped = apply_stat_bonus(pet, stat_key, boost)
-            if actual_boost > 0:
-                await conn.execute(
-                    f"UPDATE pets SET bonus_{stat_key}=bonus_{stat_key}+? WHERE id=?",
-                    (actual_boost, pet["id"])
-                )
-
-            evolved = False
-            evo_message = ""
-            new_feed_count = feed_count + 1
-
-            if pet["stage"] == 0:
-                # Egg phase — needs 3 feedings to hatch
-                await conn.execute(
-                    "UPDATE pets SET first_fed=? WHERE id=?", (new_feed_count, pet["id"])
-                )
-                if new_feed_count >= 3:
-                    # Hatch!
-                    await evolve_pet(conn, pet, 1)
-                    evolved = True
-                    evo_name = PET_NAMES[pet["element"]][pet["variant"]][1]
-                    evo_message = (
-                        f"🌟 **HATCHED!** Your egg burst open and **{evo_name}** emerged!\n"
-                        "Your journey has truly begun!"
-                    )
-                    pet = await db.get_pet(conn, pet["id"])
-                await db.add_xp(conn, pet["id"], xp_gain)
-            else:
-                await db.add_xp(conn, pet["id"], xp_gain)
-
-            await conn.commit()
-            pet = await db.get_pet(conn, pet["id"])
-
-        food_display = food["display"]
-        stat_display = stat_key.upper()
-        element = pet["element"]
-        variant = pet["variant"]
-        stage = pet["stage"]
-        name = pet.get("nickname") or PET_NAMES[element][variant][stage]
-        color = ELEMENT_COLORS[element]
-
-        image_path = get_pet_image(element, variant, stage) if evolved else get_food_image(item)
-        try:
-            file = discord.File(image_path, filename="img.png")
-            has_img = True
-        except FileNotFoundError:
-            has_img = False
-
-        embed = discord.Embed(color=color)
-        stat_line = f"+{actual_boost} {stat_display}" if actual_boost > 0 else f"{stat_display} is at cap!"
-        cap_note = " *(stat capped)*" if was_capped and actual_boost == 0 else ""
-
-        if evolved:
-            embed.title = f"🌟 {name} hatched!"
-            embed.description = evo_message
-            if has_img:
-                embed.set_image(url="attachment://img.png")
-        elif pet["stage"] == 0:
-            # Still an egg
-            remaining = 3 - new_feed_count
-            dots = "🟡" * new_feed_count + "⚪" * remaining
-            embed.title = f"🥚 Your egg enjoyed the meal!"
-            embed.description = f"{dots} **{new_feed_count}/3 feedings** — {remaining} more to hatch!"
-            food_file_path = get_food_image(item)
-            try:
-                file = discord.File(food_file_path, filename="img.png")
-                has_img = True
-                embed.set_thumbnail(url="attachment://img.png")
-            except FileNotFoundError:
-                has_img = False
-        else:
-            embed.title = f"🍽️ {name} ate {food_display}!"
-            if has_img:
-                embed.set_thumbnail(url="attachment://img.png")
-
-        embed.add_field(name="Stat Boost", value=f"{stat_line}{cap_note}", inline=True)
-        embed.add_field(name="XP Gained", value=f"+{xp_gain} XP", inline=True)
-
-        if pet["stage"] > 0:
-            lvl_after = pet["level"]
-            xp_after = pet["xp"]
-            embed.add_field(
-                name="Level", value=f"Level {lvl_after} | {xp_after}/{xp_for_next_level(lvl_after)} XP",
-                inline=False
-            )
-
-        if has_img:
-            await interaction.response.send_message(embed=embed, file=file)
-        else:
-            await interaction.response.send_message(embed=embed)
-
-        # Broadcast hatch to channel
-        if evolved and interaction.guild:
-            evo_name = PET_NAMES[pet["element"]][pet["variant"]][1]
-            emoji = ELEMENT_EMOJIS[pet["element"]]
-            await interaction.channel.send(
-                f"🎉 {interaction.user.mention}'s egg just hatched! Say hello to **{evo_name}** {emoji}!"
-            )
+        view = FeedView(interaction.user.id, feedable, food_inv, interaction)
+        embed = discord.Embed(
+            title="🍽️ Feed a pet",
+            description="Select a pet and a food item below, then click **Feed**.",
+            color=0x2ECC71
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @app_commands.command(name="train", description="Daily training — boost a random stat and gain XP")
     async def train(self, interaction: discord.Interaction):
