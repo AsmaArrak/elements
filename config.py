@@ -137,13 +137,13 @@ FOOD_ITEMS = {
 }
 
 SHOP_ITEMS = {
-    "apple":   {"price": 30,  "type": "food", "description": "Boosts HP by 5"},
-    "bread":   {"price": 25,  "type": "food", "description": "Boosts DEF by 4"},
-    "carrot":  {"price": 25,  "type": "food", "description": "Boosts SPD by 5"},
-    "cheese":  {"price": 30,  "type": "food", "description": "Boosts ATK by 5"},
-    "chicken": {"price": 50,  "type": "food", "description": "Boosts ATK by 8"},
-    "fish":    {"price": 45,  "type": "food", "description": "Boosts MGK by 7"},
-    "grape":   {"price": 25,  "type": "food", "description": "Boosts RES by 5"},
+    "apple":   {"price": 500,  "type": "food", "description": "Boosts HP by 5"},
+    "bread":   {"price": 500,  "type": "food", "description": "Boosts DEF by 4"},
+    "carrot":  {"price": 500,  "type": "food", "description": "Boosts SPD by 5"},
+    "cheese":  {"price": 500,  "type": "food", "description": "Boosts ATK by 5"},
+    "chicken": {"price": 800,  "type": "food", "description": "Boosts ATK by 8"},
+    "fish":    {"price": 800,  "type": "food", "description": "Boosts MGK by 7"},
+    "grape":   {"price": 500,  "type": "food", "description": "Boosts RES by 5"},
 }
 # Cake and honey are NOT sold in the shop — rare drops only
 
