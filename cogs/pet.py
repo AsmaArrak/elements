@@ -322,10 +322,7 @@ class Pet(commands.Cog):
             all_pets = await db.get_player_pets(conn, target.id)
 
         embed, file = pet_embed(pet, target)
-        if is_self:
-            embed.set_footer(text=f"💰 {p['coins']} coins | Team: {len(all_pets)} pet(s)")
-        else:
-            embed.set_footer(text=f"Team: {len(all_pets)} pet(s)")
+        embed.set_footer(text=f"💰 {p['coins']} coins | Team: {len(all_pets)} pet(s)")
 
         # Own profile is private; viewing someone else's is public
         await interaction.response.send_message(embed=embed, file=file, ephemeral=is_self)

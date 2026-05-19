@@ -125,26 +125,46 @@ EVO_REQUIREMENTS = {
 }
 
 FOOD_ITEMS = {
-    "apple":   {"stat": "hp",  "boost": 5,  "rarity": "common",   "xp": 20, "display": "Apple 🍎"},
-    "bread":   {"stat": "def", "boost": 4,  "rarity": "common",   "xp": 20, "display": "Bread 🍞"},
-    "carrot":  {"stat": "spd", "boost": 5,  "rarity": "common",   "xp": 20, "display": "Carrot 🥕"},
-    "cheese":  {"stat": "atk", "boost": 5,  "rarity": "common",   "xp": 20, "display": "Cheese 🧀"},
-    "chicken": {"stat": "atk", "boost": 8,  "rarity": "uncommon", "xp": 30, "display": "Chicken 🍗"},
-    "fish":    {"stat": "mgk", "boost": 7,  "rarity": "uncommon", "xp": 30, "display": "Fish 🐟"},
-    "grape":   {"stat": "res", "boost": 5,  "rarity": "common",   "xp": 20, "display": "Grape 🍇"},
-    "cake":    {"stat": "hp",  "boost": 20, "rarity": "rare",     "xp": 60, "display": "Cake 🎂"},
-    "honey":   {"stat": "mgk", "boost": 18, "rarity": "rare",     "xp": 60, "display": "Honey 🍯"},
+    # Common — all 6 stats covered
+    "apple":    {"stat": "hp",  "boost": 5,  "rarity": "common",   "xp": 20, "display": "Apple 🍎"},
+    "bread":    {"stat": "def", "boost": 4,  "rarity": "common",   "xp": 20, "display": "Bread 🍞"},
+    "carrot":   {"stat": "spd", "boost": 5,  "rarity": "common",   "xp": 20, "display": "Carrot 🥕"},
+    "cheese":   {"stat": "atk", "boost": 5,  "rarity": "common",   "xp": 20, "display": "Cheese 🧀"},
+    "grape":    {"stat": "res", "boost": 5,  "rarity": "common",   "xp": 20, "display": "Grape 🍇"},
+    "mushroom": {"stat": "mgk", "boost": 5,  "rarity": "common",   "xp": 20, "display": "Mushroom 🍄"},
+    # Uncommon — all 6 stats covered
+    "chicken":  {"stat": "atk", "boost": 8,  "rarity": "uncommon", "xp": 35, "display": "Chicken 🍗"},
+    "fish":     {"stat": "mgk", "boost": 8,  "rarity": "uncommon", "xp": 35, "display": "Fish 🐟"},
+    "berry":    {"stat": "res", "boost": 8,  "rarity": "uncommon", "xp": 35, "display": "Berry 🫐"},
+    "steak":    {"stat": "def", "boost": 8,  "rarity": "uncommon", "xp": 35, "display": "Steak 🥩"},
+    "noodles":  {"stat": "spd", "boost": 8,  "rarity": "uncommon", "xp": 35, "display": "Noodles 🍜"},
+    "potion":   {"stat": "hp",  "boost": 12, "rarity": "uncommon", "xp": 35, "display": "Potion 🧪"},
+    # Rare — all 6 stats covered
+    "cake":     {"stat": "hp",  "boost": 20, "rarity": "rare",     "xp": 60, "display": "Cake 🎂"},
+    "honey":    {"stat": "mgk", "boost": 18, "rarity": "rare",     "xp": 60, "display": "Honey 🍯"},
+    "dragonfruit": {"stat": "atk", "boost": 18, "rarity": "rare",  "xp": 60, "display": "Dragonfruit 🐉"},
+    "ironbark":    {"stat": "def", "boost": 18, "rarity": "rare",  "xp": 60, "display": "Ironbark 🪵"},
+    "windleaf":    {"stat": "spd", "boost": 18, "rarity": "rare",  "xp": 60, "display": "Windleaf 🍃"},
+    "starfruit":   {"stat": "res", "boost": 18, "rarity": "rare",  "xp": 60, "display": "Starfruit ⭐"},
 }
 
 SHOP_ITEMS = {
-    "apple":   {"price": 500,  "type": "food", "description": "Boosts HP by 5"},
-    "bread":   {"price": 500,  "type": "food", "description": "Boosts DEF by 4"},
-    "carrot":  {"price": 500,  "type": "food", "description": "Boosts SPD by 5"},
-    "cheese":  {"price": 500,  "type": "food", "description": "Boosts ATK by 5"},
-    "chicken": {"price": 800,  "type": "food", "description": "Boosts ATK by 8"},
-    "fish":    {"price": 800,  "type": "food", "description": "Boosts MGK by 7"},
-    "grape":   {"price": 500,  "type": "food", "description": "Boosts RES by 5"},
+    # Common food
+    "apple":    {"price": 500,  "type": "food", "description": "Boosts HP by 5"},
+    "bread":    {"price": 500,  "type": "food", "description": "Boosts DEF by 4"},
+    "carrot":   {"price": 500,  "type": "food", "description": "Boosts SPD by 5"},
+    "cheese":   {"price": 500,  "type": "food", "description": "Boosts ATK by 5"},
+    "grape":    {"price": 500,  "type": "food", "description": "Boosts RES by 5"},
+    "mushroom": {"price": 500,  "type": "food", "description": "Boosts MGK by 5"},
+    # Uncommon food
+    "chicken":  {"price": 800,  "type": "food", "description": "Boosts ATK by 8"},
+    "fish":     {"price": 800,  "type": "food", "description": "Boosts MGK by 8"},
+    "berry":    {"price": 800,  "type": "food", "description": "Boosts RES by 8"},
+    "steak":    {"price": 800,  "type": "food", "description": "Boosts DEF by 8"},
+    "noodles":  {"price": 800,  "type": "food", "description": "Boosts SPD by 8"},
+    "potion":   {"price": 800,  "type": "food", "description": "Boosts HP by 12"},
 }
+# Rare foods (cake, honey, dragonfruit, ironbark, windleaf, starfruit) are drops only
 # Cake and honey are NOT sold in the shop — rare drops only
 
 STAT_ITEMS = {
@@ -174,8 +194,9 @@ TRAIN_XP = 20
 TRAIN_STAT_BOOST = 3
 TRAIN_COOLDOWN_HOURS = 20
 
-FISH_COOLDOWN_MINUTES = 30
-DIG_COOLDOWN_MINUTES = 45
+FISH_COOLDOWN_MINUTES = 10
+DIG_COOLDOWN_MINUTES = 10
+TRIVIA_COOLDOWN_MINUTES = 2
 
 DROP_INTERVAL_MIN = 20   # minutes between channel drops
 DROP_INTERVAL_MAX = 60

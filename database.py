@@ -103,6 +103,15 @@ async def init_db():
             );
         """)
         await db.commit()
+        # Migrations
+        for col_sql in [
+            "ALTER TABLE players ADD COLUMN last_trivia TEXT",
+        ]:
+            try:
+                await db.execute(col_sql)
+                await db.commit()
+            except Exception:
+                pass
         # Migration: add party_slot column if it doesn't exist yet
         try:
             await db.execute("ALTER TABLE pets ADD COLUMN party_slot INTEGER DEFAULT NULL")

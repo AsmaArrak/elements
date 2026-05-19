@@ -6,7 +6,7 @@ import random
 from datetime import datetime, timezone, timedelta
 
 import database as db
-from config import FOOD_ITEMS, STAT_ITEMS, FISH_COOLDOWN_MINUTES, DIG_COOLDOWN_MINUTES
+from config import FOOD_ITEMS, STAT_ITEMS, FISH_COOLDOWN_MINUTES, DIG_COOLDOWN_MINUTES, TRIVIA_COOLDOWN_MINUTES
 
 
 TRIVIA_QUESTIONS = [
@@ -43,6 +43,62 @@ TRIVIA_QUESTIONS = [
     {"q": "What language has the most native speakers?", "choices": ["English", "Spanish", "Hindi", "Mandarin"], "answer": 3},
     {"q": "How many strings does a standard guitar have?", "choices": ["4", "5", "6", "7"], "answer": 2},
     {"q": "What is the boiling point of water in Celsius?", "choices": ["90°", "95°", "100°", "105°"], "answer": 2},
+    # More general knowledge
+    {"q": "What is the hardest natural substance on Earth?", "choices": ["Gold", "Iron", "Diamond", "Quartz"], "answer": 2},
+    {"q": "How many hearts does an octopus have?", "choices": ["1", "2", "3", "4"], "answer": 2},
+    {"q": "What gas do plants absorb from the atmosphere?", "choices": ["Oxygen", "Nitrogen", "Carbon Dioxide", "Hydrogen"], "answer": 2},
+    {"q": "Which country invented paper?", "choices": ["Japan", "Egypt", "China", "India"], "answer": 2},
+    {"q": "How many teeth does an adult human have?", "choices": ["28", "30", "32", "34"], "answer": 2},
+    {"q": "What is the longest river in the world?", "choices": ["Amazon", "Mississippi", "Nile", "Yangtze"], "answer": 2},
+    {"q": "Which element has the symbol 'O'?", "choices": ["Gold", "Osmium", "Oxygen", "Oxide"], "answer": 2},
+    {"q": "How many players are on a standard soccer team?", "choices": ["9", "10", "11", "12"], "answer": 2},
+    {"q": "What is the tallest mountain in the world?", "choices": ["K2", "Kangchenjunga", "Mount Everest", "Lhotse"], "answer": 2},
+    {"q": "What instrument has 88 keys?", "choices": ["Organ", "Harpsichord", "Piano", "Accordion"], "answer": 2},
+    {"q": "What is the currency of Japan?", "choices": ["Won", "Yuan", "Yen", "Baht"], "answer": 2},
+    {"q": "How many legs does a spider have?", "choices": ["6", "7", "8", "10"], "answer": 2},
+    {"q": "Which planet is the largest in our solar system?", "choices": ["Saturn", "Neptune", "Jupiter", "Uranus"], "answer": 2},
+    {"q": "What is the square root of 144?", "choices": ["10", "11", "12", "13"], "answer": 2},
+    {"q": "What sport is played at Wimbledon?", "choices": ["Cricket", "Golf", "Tennis", "Polo"], "answer": 2},
+    {"q": "What is the capital of Australia?", "choices": ["Sydney", "Melbourne", "Canberra", "Brisbane"], "answer": 2},
+    {"q": "How many zeros are in one billion?", "choices": ["7", "8", "9", "10"], "answer": 2},
+    {"q": "What is the most abundant gas in Earth's atmosphere?", "choices": ["Oxygen", "Carbon Dioxide", "Nitrogen", "Argon"], "answer": 2},
+    {"q": "Which ocean is the smallest?", "choices": ["Indian", "Southern", "Arctic", "Atlantic"], "answer": 2},
+    {"q": "Who wrote Romeo and Juliet?", "choices": ["Charles Dickens", "Jane Austen", "William Shakespeare", "Homer"], "answer": 2},
+    {"q": "How many days are in a leap year?", "choices": ["364", "365", "366", "367"], "answer": 2},
+    {"q": "What is the capital of Canada?", "choices": ["Toronto", "Vancouver", "Montreal", "Ottawa"], "answer": 3},
+    {"q": "What is the chemical formula for water?", "choices": ["HO", "H2O", "H3O", "OH2"], "answer": 1},
+    {"q": "Which fruit is known as the 'king of fruits'?", "choices": ["Mango", "Papaya", "Durian", "Jackfruit"], "answer": 2},
+    {"q": "How many continents does the equator pass through?", "choices": ["2", "3", "4", "5"], "answer": 1},
+    {"q": "What is the speed of light (approx)?", "choices": ["100,000 km/s", "200,000 km/s", "300,000 km/s", "400,000 km/s"], "answer": 2},
+    {"q": "Which country has the most natural lakes?", "choices": ["Russia", "Brazil", "USA", "Canada"], "answer": 3},
+    {"q": "What does DNA stand for?", "choices": ["Deoxyribonucleic Acid", "Dinitrogen Acid", "Dynamic Nucleic Agent", "Dual Nitrogen Array"], "answer": 0},
+    {"q": "How many players are on a basketball team?", "choices": ["4", "5", "6", "7"], "answer": 1},
+    {"q": "What is the largest desert in the world?", "choices": ["Gobi", "Sahara", "Arabian", "Antarctic"], "answer": 3},
+    {"q": "Which animal can sleep for up to 3 years?", "choices": ["Bear", "Bat", "Snail", "Tortoise"], "answer": 2},
+    {"q": "How many minutes are in a day?", "choices": ["1,000", "1,140", "1,440", "1,600"], "answer": 2},
+    {"q": "What is the most spoken language in Africa?", "choices": ["French", "Swahili", "Arabic", "Amharic"], "answer": 2},
+    {"q": "What is the powerhouse of the cell?", "choices": ["Nucleus", "Ribosome", "Mitochondria", "Vacuole"], "answer": 2},
+    {"q": "Which country is the largest by area?", "choices": ["China", "USA", "Canada", "Russia"], "answer": 3},
+    {"q": "How many sides does a pentagon have?", "choices": ["4", "5", "6", "7"], "answer": 1},
+    {"q": "What planet has rings around it?", "choices": ["Mars", "Venus", "Saturn", "Neptune"], "answer": 2},
+    {"q": "What is the capital of Brazil?", "choices": ["Rio de Janeiro", "São Paulo", "Brasília", "Salvador"], "answer": 2},
+    {"q": "How many keys does a standard piano have?", "choices": ["76", "80", "88", "92"], "answer": 2},
+    {"q": "What is the atomic number of Carbon?", "choices": ["4", "6", "8", "12"], "answer": 1},
+    {"q": "Which gas makes up the sun?", "choices": ["Helium only", "Hydrogen only", "Mostly Hydrogen", "Mostly Oxygen"], "answer": 2},
+    {"q": "What year did the first iPhone release?", "choices": ["2005", "2006", "2007", "2008"], "answer": 2},
+    {"q": "How many bones are in the human hand?", "choices": ["22", "25", "27", "30"], "answer": 2},
+    {"q": "What is the fastest bird?", "choices": ["Eagle", "Ostrich", "Peregrine Falcon", "Albatross"], "answer": 2},
+    {"q": "What country gifted the Statue of Liberty to the USA?", "choices": ["Britain", "Spain", "France", "Italy"], "answer": 2},
+    {"q": "How many chromosomes do humans have?", "choices": ["44", "46", "48", "50"], "answer": 1},
+    {"q": "What does 'www' stand for in a URL?", "choices": ["World Wide Web", "World Web Works", "Wide World Web", "Web World Wide"], "answer": 0},
+    {"q": "What is the most popular sport in the world?", "choices": ["Basketball", "Cricket", "Soccer", "Tennis"], "answer": 2},
+    {"q": "Which element is liquid at room temperature?", "choices": ["Gold", "Mercury", "Tin", "Lead"], "answer": 1},
+    # More game questions
+    {"q": "What do you need to evolve from Evo 2 to Evo 3?", "choices": ["Mega Stone", "Uncommon Evo Stone", "Rare Evo Stone", "Level 100"], "answer": 2},
+    {"q": "Which stat does 'RES' affect?", "choices": ["Physical damage dealt", "Magic damage taken", "Speed", "Healing"], "answer": 1},
+    {"q": "How many feedings does an egg need to hatch?", "choices": ["1", "2", "3", "4"], "answer": 2},
+    {"q": "What is the Bloom element weak to?", "choices": ["Ember", "Tide", "Toxin", "Forge"], "answer": 2},
+    {"q": "What is the Tide element strong against?", "choices": ["Crystal, Bloom", "Void, Phantom", "Ember, Forge", "Storm, Toxin"], "answer": 2},
 ]
 
 
@@ -277,6 +333,29 @@ class Minigames(commands.Cog):
 
     @app_commands.command(name="trivia", description="Answer a trivia question to win coins")
     async def trivia(self, interaction: discord.Interaction):
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            await db.ensure_player(conn, interaction.user.id)
+            p = await db.get_player(conn, interaction.user.id)
+
+        last = p.get("last_trivia")
+        if last:
+            last_dt = datetime.fromisoformat(last)
+            diff = datetime.now(timezone.utc) - last_dt
+            cd = timedelta(minutes=TRIVIA_COOLDOWN_MINUTES)
+            if diff < cd:
+                remaining = int((cd - diff).total_seconds())
+                await interaction.response.send_message(
+                    f"⏳ Trivia resets in **{remaining}s**.", ephemeral=True
+                )
+                return
+
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            await conn.execute(
+                "UPDATE players SET last_trivia=? WHERE user_id=?",
+                (datetime.now(timezone.utc).isoformat(), interaction.user.id)
+            )
+            await conn.commit()
+
         question = random.choice(TRIVIA_QUESTIONS)
         labels = ["A", "B", "C", "D"]
         choices_text = "\n".join(
@@ -288,7 +367,7 @@ class Minigames(commands.Cog):
             description=f"**{question['q']}**\n\n{choices_text}",
             color=0x9B59B6
         )
-        embed.set_footer(text="First to click the right answer wins coins! • 20 seconds")
+        embed.set_footer(text=f"First to click the right answer wins coins! • 20s • {TRIVIA_COOLDOWN_MINUTES}min cooldown")
         view = TriviaView(question, interaction.channel_id)
         await interaction.response.send_message(embed=embed, view=view)
 
