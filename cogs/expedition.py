@@ -611,6 +611,17 @@ class Expedition(commands.Cog):
 
     @app_commands.command(name="collect", description="Collect your pet and loot after an expedition")
     async def collect(self, interaction: discord.Interaction):
+        try:
+         await self._collect(interaction)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            try:
+                await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+            except Exception:
+                await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+    async def _collect(self, interaction: discord.Interaction):
         async with aiosqlite.connect(db.DB_PATH) as conn:
             player = await db.get_player(conn, interaction.user.id)
             if not player:
@@ -659,12 +670,13 @@ class Expedition(commands.Cog):
                     (coin_total, interaction.user.id)
                 )
 
-            # XP for pet
-            xp_gain = EXPEDITION_XP[exp["duration_hrs"]]
+            # XP for pet — fall back to closest key for legacy expedition durations
+            dur = exp["duration_hrs"]
+            xp_gain = EXPEDITION_XP.get(dur) or EXPEDITION_XP[min(EXPEDITION_XP, key=lambda k: abs(k - dur))]
             await db.add_xp(conn, pet["id"], xp_gain)
 
             # Exploration gain
-            exp_gain = EXPLORATION_GAIN[exp["duration_hrs"]]
+            exp_gain = EXPLORATION_GAIN.get(dur) or EXPLORATION_GAIN[min(EXPLORATION_GAIN, key=lambda k: abs(k - dur))]
             new_exploration = min(100, pet["exploration"] + exp_gain)
             await conn.execute(
                 "UPDATE pets SET exploration=? WHERE id=?", (new_exploration, pet["id"])
