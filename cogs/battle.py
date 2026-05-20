@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import aiosqlite
+import os
 import random
 from datetime import datetime, timezone
 
@@ -51,6 +52,8 @@ class BattleState:
         self.turn = 1
         self.log: list[str] = []
         self.message: discord.Message | None = None
+        self.c_pet_img_url: str | None = None
+        self.o_pet_img_url: str | None = None
 
     @property
     def c_current(self) -> Combatant:
@@ -129,7 +132,6 @@ class BattleState:
                 move = action.get("move", "default")
 
                 if move == "default":
-                    # Default attack — uses attacker's element for type advantage
                     att_name = action.get("name", "Attack")
                     att_type = action.get("attack_type", "physical")
                     mult = action.get("mult", 1.1)
@@ -168,7 +170,6 @@ class BattleState:
 
                 if not defender.alive:
                     logs.append(f"💀 **{defender.name}** fainted!")
-                    # Auto-switch to next alive pet
                     if side == "challenger":
                         alive = self.o_alive_indices
                         if alive:
@@ -230,12 +231,12 @@ def build_battle_embed(state: BattleState, c_user: discord.User, o_user: discord
         inline=False
     )
 
-    # Show action status
-    c_ready = "✅" if state.c_action else "⏳"
-    o_ready = "✅" if state.o_action else "⏳"
+    # ⚔️ = chose their move, ⏳ = still deciding
+    c_ready = "⚔️ Ready" if state.c_action else "⏳ Deciding..."
+    o_ready = "⚔️ Ready" if state.o_action else "⏳ Deciding..."
     embed.add_field(
         name="Actions",
-        value=f"{c_ready} {c_user.display_name} · {o_ready} {o_user.display_name}",
+        value=f"{c_ready} — {c_user.display_name}\n{o_ready} — {o_user.display_name}",
         inline=False
     )
 
@@ -245,7 +246,12 @@ def build_battle_embed(state: BattleState, c_user: discord.User, o_user: discord
         embed.add_field(name="📜 Battle Log", value="\n".join(log_lines), inline=False)
 
     if waiting:
-        embed.set_footer(text="Both players select an action below.")
+        embed.set_footer(text="Both players select a move below.")
+
+    # Pet image (challenger's active pet, stored from battle start)
+    if state.c_pet_img_url:
+        embed.set_thumbnail(url=state.c_pet_img_url)
+
     return embed
 
 
@@ -295,112 +301,100 @@ class BattleView(discord.ui.View):
     def _is_challenger(self, user: discord.User) -> bool:
         return user.id == self.state.challenger_id
 
-    async def _set_action(self, interaction: discord.Interaction, action: dict):
-        is_c = self._is_challenger(interaction.user)
+    async def _queue_and_update(self, interaction: discord.Interaction, action: dict, is_c: bool):
+        """Record action, update the shared embed to show ⚔️, then check if turn resolves."""
         state = self.state
         if is_c:
-            if state.c_action:
-                await interaction.response.send_message("You already chose an action!", ephemeral=True)
-                return
             state.c_action = action
         else:
-            if state.o_action:
-                await interaction.response.send_message("You already chose an action!", ephemeral=True)
-                return
             state.o_action = action
-        await interaction.response.send_message("Action queued!", ephemeral=True)
+
+        # Update the main battle embed so the other player sees ⚔️ Ready immediately
+        if state.message and not state.both_acted():
+            try:
+                updated = build_battle_embed(state, self.c_user, self.o_user, waiting=True)
+                await state.message.edit(embed=updated)
+            except Exception:
+                pass
+
         await maybe_resolve(state, interaction)
 
-    @discord.ui.button(label="⚔️ Attack", style=discord.ButtonStyle.danger, row=0)
-    async def attack(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="⚔️ Moves", style=discord.ButtonStyle.danger, row=0)
+    async def moves_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self._is_participant(interaction.user):
             await interaction.response.send_message("You're not in this battle!", ephemeral=True)
             return
         is_c = self._is_challenger(interaction.user)
-        current = self.state.c_current if is_c else self.state.o_current
+        state = self.state
+        if (is_c and state.c_action) or (not is_c and state.o_action):
+            await interaction.response.send_message("You already chose a move this turn!", ephemeral=True)
+            return
+
+        current = state.c_current if is_c else state.o_current
+
+        # Build unified move list: default attacks + learned skills
+        options = []
+        move_map = {}
+
         defaults = DEFAULT_ATTACKS.get(current.element, [])
-        options = [
-            discord.SelectOption(
+        for atk in defaults:
+            val = f"default:{atk['key']}"
+            options.append(discord.SelectOption(
                 label=atk["name"],
-                value=atk["key"],
+                value=val,
                 description=f"{'ATK' if atk['type'] == 'physical' else 'MGK'} · {atk['mult']}x · {atk['desc']}",
                 emoji="⚔️" if atk["type"] == "physical" else "✨"
-            )
-            for atk in defaults
-        ]
-        atk_select = discord.ui.Select(placeholder="Choose an attack...", options=options)
-        atk_map = {atk["key"]: atk for atk in defaults}
+            ))
+            move_map[val] = ("default", atk)
 
-        async def atk_callback(inter: discord.Interaction):
-            if inter.user.id != interaction.user.id:
-                await inter.response.send_message("Not your menu!", ephemeral=True)
-                return
-            chosen = atk_map[atk_select.values[0]]
-            action = {
-                "type": "attack", "move": "default",
-                "name": chosen["name"], "attack_type": chosen["type"], "mult": chosen["mult"]
-            }
-            if is_c:
-                self.state.c_action = action
-            else:
-                self.state.o_action = action
-            await inter.response.send_message(f"**{chosen['name']}** queued!", ephemeral=True)
-            await maybe_resolve(self.state, inter)
-
-        atk_select.callback = atk_callback
-        sv = discord.ui.View(timeout=30)
-        sv.add_item(atk_select)
-        await interaction.response.send_message("Choose an attack:", view=sv, ephemeral=True)
-
-    @discord.ui.button(label="📚 Skills", style=discord.ButtonStyle.primary, row=0)
-    async def skill_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not self._is_participant(interaction.user):
-            await interaction.response.send_message("You're not in this battle!", ephemeral=True)
-            return
-        is_c = self._is_challenger(interaction.user)
-        current = self.state.c_current if is_c else self.state.o_current
-        # Load learned skills from DB
         async with aiosqlite.connect(db.DB_PATH) as conn:
             async with conn.execute(
                 "SELECT skill_key FROM pet_skills WHERE pet_id=?", (current.pet["id"],)
             ) as cur:
                 learned = [r[0] for r in await cur.fetchall()]
-        if not learned:
-            await interaction.response.send_message(
-                "This pet has no learned skills! Use `/learn` with scrolls from expeditions.",
-                ephemeral=True
-            )
-            return
-        options = []
-        for sk in learned:
-            s = SKILLS.get(sk, {})
+
+        for sk_key in learned:
+            s = SKILLS.get(sk_key, {})
             r_emoji = RARITY_EMOJIS.get(s.get("rarity", ""), "⚪")
-            stat = "ATK" if s.get("type") == "physical" else "MGK"
+            val = f"skill:{sk_key}"
             options.append(discord.SelectOption(
-                label=s.get("name", sk),
-                value=sk,
-                description=f"{s.get('mult', 1)}x {stat} · {s.get('rarity', '').title()}",
+                label=s.get("name", sk_key),
+                value=val,
+                description=f"{s.get('mult', 1.0)}x {'ATK' if s.get('type') == 'physical' else 'MGK'} · {s.get('rarity', '').title()}",
                 emoji=r_emoji
             ))
-        skill_select = discord.ui.Select(placeholder="Choose a skill...", options=options)
-        async def skill_callback(inter: discord.Interaction):
+            move_map[val] = ("skill", s, sk_key)
+
+        if not options:
+            await interaction.response.send_message("No moves available!", ephemeral=True)
+            return
+
+        move_select = discord.ui.Select(placeholder="Choose a move...", options=options)
+
+        async def move_callback(inter: discord.Interaction):
             if inter.user.id != interaction.user.id:
                 await inter.response.send_message("Not your menu!", ephemeral=True)
                 return
-            chosen = skill_select.values[0]
-            await inter.response.send_message(
-                f"Skill **{SKILLS[chosen]['name']}** queued!", ephemeral=True
-            )
-            action = {"type": "attack", "move": "skill", "skill_key": chosen}
-            if is_c:
-                self.state.c_action = action
+            val = move_select.values[0]
+            entry = move_map[val]
+            if entry[0] == "default":
+                atk = entry[1]
+                action = {
+                    "type": "attack", "move": "default",
+                    "name": atk["name"], "attack_type": atk["type"], "mult": atk["mult"]
+                }
+                label = atk["name"]
             else:
-                self.state.o_action = action
-            await maybe_resolve(self.state, inter)
-        skill_select.callback = skill_callback
+                _, s, sk_key = entry
+                action = {"type": "attack", "move": "skill", "skill_key": sk_key}
+                label = s.get("name", sk_key)
+            await inter.response.send_message(f"⚔️ **{label}** queued!", ephemeral=True)
+            await self._queue_and_update(inter, action, is_c)
+
+        move_select.callback = move_callback
         sv = discord.ui.View(timeout=30)
-        sv.add_item(skill_select)
-        await interaction.response.send_message("Choose a skill to use:", view=sv, ephemeral=True)
+        sv.add_item(move_select)
+        await interaction.response.send_message("Choose a move:", view=sv, ephemeral=True)
 
     @discord.ui.button(label="🔄 Switch", style=discord.ButtonStyle.secondary, row=0)
     async def switch(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -422,11 +416,16 @@ class BattleView(discord.ui.View):
         if not self._is_participant(interaction.user):
             await interaction.response.send_message("You're not in this battle!", ephemeral=True)
             return
-        await self._set_action(interaction, {"type": "forfeit"})
+        is_c = self._is_challenger(interaction.user)
+        state = self.state
+        if (is_c and state.c_action) or (not is_c and state.o_action):
+            await interaction.response.send_message("You already chose an action!", ephemeral=True)
+            return
+        await interaction.response.send_message("You forfeited!", ephemeral=True)
+        await self._queue_and_update(interaction, {"type": "forfeit"}, is_c)
 
     async def on_timeout(self):
         state = self.state
-        # Auto-attack with first default move for those who didn't pick
         def _default_action(element: str) -> dict:
             atk = DEFAULT_ATTACKS.get(element, [{"name": "Tackle", "type": "physical", "mult": 1.1}])[0]
             return {"type": "attack", "move": "default", "name": atk["name"], "attack_type": atk["type"], "mult": atk["mult"]}
@@ -505,12 +504,11 @@ async def resolve_and_update(state: BattleState, channel, c_user, o_user):
         active_battles.pop(channel.id, None)
         return
 
-    # Continue battle
+    # Continue battle — new turn
     embed = build_battle_embed(state, c_user, o_user, extra_log=new_logs, waiting=True)
     view = BattleView(state, c_user, o_user)
     if state.message:
         await state.message.edit(embed=embed, view=view)
-    state.turn
 
 
 class AcceptView(discord.ui.View):
@@ -537,11 +535,35 @@ class AcceptView(discord.ui.View):
         )
         active_battles[self.channel_id] = state
 
+        # Load pet images for challenger and opponent's active pets
+        files = []
+        c_pet = self.c_pets[0] if self.c_pets else None
+        o_pet = self.o_pets[0] if self.o_pets else None
+        if c_pet:
+            img = get_pet_image(c_pet["element"], c_pet["variant"], c_pet["stage"])
+            if img and os.path.exists(img):
+                files.append(discord.File(img, filename="challenger_pet.png"))
+        if o_pet:
+            img = get_pet_image(o_pet["element"], o_pet["variant"], o_pet["stage"])
+            if img and os.path.exists(img):
+                files.append(discord.File(img, filename="opponent_pet.png"))
+
         embed = build_battle_embed(state, self.challenger, self.opponent, waiting=True)
+        if files:
+            embed.set_thumbnail(url="attachment://challenger_pet.png")
+
         view = BattleView(state, self.challenger, self.opponent)
-        msg = await interaction.response.send_message(embed=embed, view=view)
-        # Store message reference via followup
+        await interaction.response.send_message(
+            embed=embed, view=view,
+            files=files if files else discord.utils.MISSING
+        )
         state.message = await interaction.original_response()
+
+        # Store CDN attachment URLs so we can reference them in future embed edits
+        if state.message.attachments:
+            state.c_pet_img_url = state.message.attachments[0].url
+            if len(state.message.attachments) > 1:
+                state.o_pet_img_url = state.message.attachments[1].url
 
     @discord.ui.button(label="❌ Decline", style=discord.ButtonStyle.danger)
     async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -589,7 +611,6 @@ class Battle(commands.Cog):
             c_all_pets = await db.get_player_pets(conn, interaction.user.id)
             o_all_pets = await db.get_player_pets(conn, opponent.id)
 
-        # Filter out egg-stage and expedition pets
         c_exp_pet_id = c_exp["pet_id"] if c_exp else None
         o_exp_pet_id = o_exp["pet_id"] if o_exp else None
 
@@ -607,7 +628,6 @@ class Battle(commands.Cog):
             )
             return
 
-        # Use up to 5 pets, sorted by level descending
         c_pets = sorted(c_pets, key=lambda p: p["level"], reverse=True)[:5]
         o_pets = sorted(o_pets, key=lambda p: p["level"], reverse=True)[:5]
 
