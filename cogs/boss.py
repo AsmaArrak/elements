@@ -153,6 +153,13 @@ def _pick_random_scroll(scroll_rarity: str) -> str | None:
 
 # ── Combatant & Session ────────────────────────────────────────────────────────
 
+def _has_full_set(pet: dict) -> bool:
+    pieces = pet.get("equipped_pieces", [])
+    if len(pieces) < 4:
+        return False
+    return len({p.get("set_name") for p in pieces}) == 1
+
+
 class BossCombatant:
     def __init__(self, pet: dict):
         self.pet = pet
@@ -165,6 +172,7 @@ class BossCombatant:
             pet.get("nickname")
             or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
         )
+        self.set_bonus_mult = 1.2 if _has_full_set(pet) else 1.0
 
     @property
     def alive(self) -> bool:
@@ -237,8 +245,14 @@ def calc_player_damage_to_boss(
         base = int(base * 1.5)
         se = " ✨ *Super effective!*"
 
-    dmg = max(1, int(base * mult * random.uniform(0.88, 1.12)))
-    log_line = f"⚔️ **{attacker.name}** used **{name}** for **{dmg}** damage!{se}"
+    # Apply 4-piece armor set bonus (+20% magic DMG) if applicable
+    is_magic = (move_type == "default" and move_info.get("attack_type") != "physical") or \
+               (move_type != "default" and SKILLS.get(move_info.get("skill_key",""), {}).get("type") != "physical")
+    set_mult = attacker.set_bonus_mult if is_magic else 1.0
+    set_note = " 🛡️✨" if set_mult > 1.0 else ""
+
+    dmg = max(1, int(base * mult * set_mult * random.uniform(0.88, 1.12)))
+    log_line = f"⚔️ **{attacker.name}** used **{name}** for **{dmg}** damage!{se}{set_note}"
     return dmg, log_line
 
 

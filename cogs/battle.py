@@ -10,13 +10,22 @@ import database as db
 from config import (
     ELEMENT_DISPLAY, ELEMENT_EMOJIS, ELEMENT_COLORS, PET_NAMES, STAGE_NAMES,
     BATTLE_WIN_XP, BATTLE_LOSS_XP, BATTLE_WIN_COINS, BATTLE_LOSS_COINS,
-    TYPE_ADVANTAGE, RARITY_EMOJIS, get_pet_image
+    TYPE_ADVANTAGE, RARITY_EMOJIS, get_pet_image, PLAYER_XP_SOURCES
 )
 from game.stats import effective_stats, hp_bar, calc_physical_damage, calc_magic_damage
 from game.skills import SKILLS, DEFAULT_ATTACKS
 
 # In-memory battle states: channel_id -> BattleState
 active_battles: dict[int, "BattleState"] = {}
+
+
+def _has_full_set(pet: dict) -> bool:
+    """Return True if all 4 equipped armor pieces share the same set_name (element)."""
+    pieces = pet.get("equipped_pieces", [])
+    if len(pieces) < 4:
+        return False
+    set_names = {p.get("set_name") for p in pieces}
+    return len(set_names) == 1
 
 
 class Combatant:
@@ -28,6 +37,8 @@ class Combatant:
         self.stats = stats
         self.element = pet["element"]
         self.name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
+        # +20% magic DMG multiplier when wearing a full 4-piece armor set
+        self.set_bonus_mult = 1.2 if _has_full_set(pet) else 1.0
 
     @property
     def alive(self):
@@ -52,6 +63,9 @@ class BattleState:
         self.turn = 1
         self.log: list[str] = []
         self.message: discord.Message | None = None
+        # Track which pet IDs actually participated (took or dealt damage)
+        self.c_participated: set[int] = set()
+        self.o_participated: set[int] = set()
         self.c_pet_img_url: str | None = None
         self.o_pet_img_url: str | None = None
 
@@ -115,12 +129,21 @@ class BattleState:
                 self.o_active = idx
                 logs.append(f"🔄 Opponent switched to **{self.o_current.name}**!")
 
-        # Determine turn order by SPD
-        c_first = self.c_current.stats["spd"] >= self.o_current.stats["spd"]
+        # Determine turn order by SPD; ties broken randomly
+        c_spd = self.c_current.stats["spd"]
+        o_spd = self.o_current.stats["spd"]
+        if c_spd == o_spd:
+            c_first = random.random() < 0.5
+        else:
+            c_first = c_spd > o_spd
         actions = [(ca, self.c_current, self.o_current, "challenger"),
                    (oa, self.o_current, self.c_current, "opponent")]
         if not c_first:
             actions = [actions[1], actions[0]]
+
+        # Mark both active pets as participated this turn
+        self.c_participated.add(self.c_current.pet["id"])
+        self.o_participated.add(self.o_current.pet["id"])
 
         for action, attacker, defender, side in actions:
             if not attacker.alive or not defender.alive:
@@ -137,16 +160,18 @@ class BattleState:
                     mult = action.get("mult", 1.1)
                     if att_type == "physical":
                         base = calc_physical_damage(attacker.stats, defender.stats)
+                        dmg = int(base * mult)
                     else:
                         base, _ = calc_magic_damage(attacker.pet, defender.pet, attacker.stats, defender.stats)
-                    dmg = int(base * mult)
+                        dmg = int(base * mult * attacker.set_bonus_mult)
                     if defender.element in TYPE_ADVANTAGE.get(attacker.element, []):
                         dmg = int(dmg * 1.5)
                         se_note = " ✨ *Super effective!*"
                     else:
                         se_note = ""
+                    set_note = " 🛡️✨" if attacker.set_bonus_mult > 1.0 and att_type != "physical" else ""
                     defender.take_damage(dmg)
-                    logs.append(f"⚔️ **{attacker.name}** used **{att_name}** on **{defender.name}** for **{dmg}** damage!{se_note}")
+                    logs.append(f"⚔️ **{attacker.name}** used **{att_name}** on **{defender.name}** for **{dmg}** damage!{se_note}{set_note}")
 
                 elif move == "skill":
                     skill_key = action.get("skill_key")
@@ -158,15 +183,16 @@ class BattleState:
                         dmg = int(base * mult)
                     else:
                         base, _ = calc_magic_damage(attacker.pet, defender.pet, attacker.stats, defender.stats)
-                        dmg = int(base * mult)
+                        dmg = int(base * mult * attacker.set_bonus_mult)
                     if defender.element in TYPE_ADVANTAGE.get(skill_elem, []):
                         dmg = int(dmg * 1.5)
                         se_note = " ✨ *Super effective!*"
                     else:
                         se_note = ""
+                    set_note = " 🛡️✨" if attacker.set_bonus_mult > 1.0 and skill.get("type") != "physical" else ""
                     defender.take_damage(dmg)
                     r_emoji = RARITY_EMOJIS.get(skill.get("rarity", ""), "")
-                    logs.append(f"{r_emoji} **{attacker.name}** used **{skill.get('name', skill_key)}** on **{defender.name}** for **{dmg}** damage!{se_note}")
+                    logs.append(f"{r_emoji} **{attacker.name}** used **{skill.get('name', skill_key)}** on **{defender.name}** for **{dmg}** damage!{se_note}{set_note}")
 
                 if not defender.alive:
                     logs.append(f"💀 **{defender.name}** fainted!")
@@ -467,12 +493,24 @@ async def resolve_and_update(state: BattleState, channel, c_user, o_user):
         loser_id = loser.id
 
         async with aiosqlite.connect(db.DB_PATH) as conn:
-            winner_pet = await db.get_active_pet(conn, winner_id)
-            loser_pet = await db.get_active_pet(conn, loser_id)
-            if winner_pet:
-                await db.add_xp(conn, winner_pet["id"], BATTLE_WIN_XP)
-            if loser_pet:
-                await db.add_xp(conn, loser_pet["id"], BATTLE_LOSS_XP)
+            # Split pet XP evenly across all pets that actually fought
+            c_pet_ids = list(state.c_participated) or [state.c_combatants[0].pet["id"]]
+            o_pet_ids = list(state.o_participated) or [state.o_combatants[0].pet["id"]]
+
+            c_xp_each = max(1, BATTLE_WIN_XP // len(c_pet_ids)) if state.c_won else max(1, BATTLE_LOSS_XP // len(c_pet_ids))
+            o_xp_each = max(1, BATTLE_WIN_XP // len(o_pet_ids)) if state.o_won else max(1, BATTLE_LOSS_XP // len(o_pet_ids))
+
+            for pet_id in c_pet_ids:
+                await db.add_xp(conn, pet_id, c_xp_each)
+            for pet_id in o_pet_ids:
+                await db.add_xp(conn, pet_id, o_xp_each)
+
+            # Player XP
+            w_player_xp = PLAYER_XP_SOURCES.get("battle_win", 15)
+            l_player_xp = PLAYER_XP_SOURCES.get("battle_loss", 5)
+            await db.add_player_xp(conn, winner_id, w_player_xp)
+            await db.add_player_xp(conn, loser_id, l_player_xp)
+
             await conn.execute(
                 "UPDATE players SET coins=coins+? WHERE user_id=?", (BATTLE_WIN_COINS, winner_id)
             )
@@ -485,14 +523,21 @@ async def resolve_and_update(state: BattleState, channel, c_user, o_user):
             )
             await conn.commit()
 
+        c_count = len(c_pet_ids)
+        o_count = len(o_pet_ids)
+        w_xp_each = c_xp_each if state.c_won else o_xp_each
+        l_xp_each = o_xp_each if state.c_won else c_xp_each
+        w_count = c_count if state.c_won else o_count
+        l_count = o_count if state.c_won else c_count
+
         embed = build_battle_embed(state, c_user, o_user, extra_log=new_logs, waiting=False)
         embed.color = 0xFFD700
         embed.add_field(
             name="🏆 Battle Over!",
             value=(
                 f"**{winner.display_name}** wins! 🎉\n"
-                f"+{BATTLE_WIN_XP} XP, +{BATTLE_WIN_COINS} coins for {winner.display_name}\n"
-                f"+{BATTLE_LOSS_XP} XP, +{BATTLE_LOSS_COINS} coins for {loser.display_name}"
+                f"+{w_xp_each} XP × {w_count} pet(s) · +{w_player_xp} player XP · +{BATTLE_WIN_COINS} coins → {winner.display_name}\n"
+                f"+{l_xp_each} XP × {l_count} pet(s) · +{l_player_xp} player XP · +{BATTLE_LOSS_COINS} coins → {loser.display_name}"
             ),
             inline=False
         )

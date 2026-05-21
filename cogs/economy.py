@@ -561,10 +561,15 @@ class RestartConfirmView(discord.ui.View):
         self.stop()
 
         async with aiosqlite.connect(db.DB_PATH) as conn:
-            await conn.execute("DELETE FROM inventory WHERE player_id=?", (interaction.user.id,))
-            await conn.execute("DELETE FROM expeditions WHERE player_id=?", (interaction.user.id,))
-            await conn.execute("DELETE FROM pets WHERE player_id=?", (interaction.user.id,))
-            await conn.execute("DELETE FROM players WHERE user_id=?", (interaction.user.id,))
+            uid = interaction.user.id
+            await conn.execute("DELETE FROM inventory WHERE player_id=?", (uid,))
+            await conn.execute("DELETE FROM expeditions WHERE player_id=?", (uid,))
+            await conn.execute("DELETE FROM armor_inventory WHERE player_id=?", (uid,))
+            await conn.execute("DELETE FROM pet_skills WHERE pet_id IN (SELECT id FROM pets WHERE player_id=?)", (uid,))
+            await conn.execute("DELETE FROM boss_damage_log WHERE player_id=?", (uid,))
+            await conn.execute("DELETE FROM element_pity WHERE player_id=?", (uid,))
+            await conn.execute("DELETE FROM pets WHERE player_id=?", (uid,))
+            await conn.execute("DELETE FROM players WHERE user_id=?", (uid,))
             await conn.commit()
 
         await interaction.response.edit_message(

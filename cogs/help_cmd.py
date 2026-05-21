@@ -128,7 +128,7 @@ class Help(commands.Cog):
                 "`/dungeon <name>` — Farm a dungeon for armor pieces (costs **20 🌙**)\n"
                 "`/moonshard` — Check Moon Shards, regen timer & player level\n"
                 "`/upgradearmor` — Sacrifice armor pieces to level up another (1→15)\n"
-                "*🌙 Moon Shards regen +1 every 3 min · cap 120 · better loot at higher player level*\n"
+                "*🌙 Moon Shards regen +1 every 1 min · cap 120 · better loot at higher player level*\n"
                 "**5 Dungeons:** Ashen Ruins · Sunken Depths · Verdant Forge · Tempest Hollow · Void Nexus\n"
                 "*4-piece armor set bonus = +20% element damage in battle!*"
             ),

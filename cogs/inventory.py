@@ -347,8 +347,8 @@ class Inventory(commands.Cog):
             )
 
             # Create the pet (stage 0 = egg)
-            from game.stats import roll_base_stats
-            base = roll_base_stats(element, stage=0)
+            from game.stats import calc_base_stats
+            base = calc_base_stats(element, 0)
             await conn.execute(
                 """INSERT INTO pets (player_id, element, variant, stage, level, xp,
                    base_hp, base_atk, base_def, base_spd, base_mgk, base_res)
