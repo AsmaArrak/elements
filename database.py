@@ -249,6 +249,23 @@ async def get_pet(db: aiosqlite.Connection, pet_id: int) -> dict | None:
             return dict(zip(cols, row))
     return None
 
+async def apply_armor_to_pet(db: aiosqlite.Connection, pet: dict) -> dict:
+    """Fetch equipped armor stats and add them to the pet dict as armor_bonus_X keys."""
+    pet = dict(pet)  # don't mutate original
+    for s in ("hp", "atk", "def", "spd", "mgk", "res"):
+        pet[f"armor_bonus_{s}"] = 0
+    armor_id = pet.get("equipped_armor")
+    if armor_id:
+        async with db.execute(
+            "SELECT bonus_hp, bonus_atk, bonus_def, bonus_spd, bonus_mgk, bonus_res "
+            "FROM armor_inventory WHERE id=?", (armor_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        if row:
+            for i, s in enumerate(("hp", "atk", "def", "spd", "mgk", "res")):
+                pet[f"armor_bonus_{s}"] = row[i] or 0
+    return pet
+
 async def get_active_pet(db: aiosqlite.Connection, user_id: int) -> dict | None:
     async with db.execute(
         "SELECT * FROM pets WHERE player_id=? ORDER BY COALESCE(party_slot, 9999), id LIMIT 1",

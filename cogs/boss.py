@@ -783,6 +783,8 @@ class Boss(commands.Cog):
                 return
             pets = await db.get_player_pets(conn, interaction.user.id)
             exp = await db.get_active_expedition(conn, interaction.user.id)
+            # Merge armor bonuses into each pet dict
+            pets = [await db.apply_armor_to_pet(conn, p) for p in pets]
 
         exp_pet_id = exp["pet_id"] if exp else None
         battle_pets = [p for p in pets if p["stage"] > 0 and p["id"] != exp_pet_id][:5]

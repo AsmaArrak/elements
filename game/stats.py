@@ -12,14 +12,15 @@ def effective_stat(base: int, bonus: int, level: int) -> int:
     return min(base + bonus, cap)
 
 def effective_stats(pet: dict) -> dict:
+    """Compute effective stats including armor bonuses (armor_bonus_X keys, added uncapped on top)."""
     level = pet["level"]
     return {
-        "hp":  effective_stat(pet["base_hp"],  pet["bonus_hp"],  level),
-        "atk": effective_stat(pet["base_atk"], pet["bonus_atk"], level),
-        "def": effective_stat(pet["base_def"], pet["bonus_def"], level),
-        "spd": effective_stat(pet["base_spd"], pet["bonus_spd"], level),
-        "mgk": effective_stat(pet["base_mgk"], pet["bonus_mgk"], level),
-        "res": effective_stat(pet["base_res"], pet["bonus_res"], level),
+        "hp":  effective_stat(pet["base_hp"],  pet["bonus_hp"],  level) + pet.get("armor_bonus_hp",  0),
+        "atk": effective_stat(pet["base_atk"], pet["bonus_atk"], level) + pet.get("armor_bonus_atk", 0),
+        "def": effective_stat(pet["base_def"], pet["bonus_def"], level) + pet.get("armor_bonus_def", 0),
+        "spd": effective_stat(pet["base_spd"], pet["bonus_spd"], level) + pet.get("armor_bonus_spd", 0),
+        "mgk": effective_stat(pet["base_mgk"], pet["bonus_mgk"], level) + pet.get("armor_bonus_mgk", 0),
+        "res": effective_stat(pet["base_res"], pet["bonus_res"], level) + pet.get("armor_bonus_res", 0),
     }
 
 def max_hp(pet: dict) -> int:

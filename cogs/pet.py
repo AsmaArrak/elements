@@ -473,26 +473,30 @@ class Pet(commands.Cog):
         color = ELEMENT_COLORS[element]
         emoji = ELEMENT_EMOJIS[element]
 
+        # Apply equipped armor bonuses before computing stats
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            pet = await db.apply_armor_to_pet(conn, pet)
+
         stats = effective_stats(pet)
 
         embed = discord.Embed(title=f"{emoji} {name} — Full Stats", color=color)
 
+        def stat_line(s):
+            base = pet[f"base_{s}"]
+            food = pet[f"bonus_{s}"]
+            armor = pet.get(f"armor_bonus_{s}", 0)
+            total = stats[s]
+            parts = f"{base}+{food}" + (f"+{armor}🛡️" if armor else "")
+            return f"{s.upper()}: {parts} = **{total}**"
+
         embed.add_field(
-            name="Base Stats",
-            value=(
-                f"HP: {pet['base_hp']} (+{pet['bonus_hp']}) = **{stats['hp']}**\n"
-                f"ATK: {pet['base_atk']} (+{pet['bonus_atk']}) = **{stats['atk']}**\n"
-                f"DEF: {pet['base_def']} (+{pet['bonus_def']}) = **{stats['def']}**"
-            ),
+            name="Base Stats  *(base+food+armor)*",
+            value="\n".join(stat_line(s) for s in ("hp", "atk", "def")),
             inline=True
         )
         embed.add_field(
             name="​",
-            value=(
-                f"SPD: {pet['base_spd']} (+{pet['bonus_spd']}) = **{stats['spd']}**\n"
-                f"MGK: {pet['base_mgk']} (+{pet['bonus_mgk']}) = **{stats['mgk']}**\n"
-                f"RES: {pet['base_res']} (+{pet['bonus_res']}) = **{stats['res']}**"
-            ),
+            value="\n".join(stat_line(s) for s in ("spd", "mgk", "res")),
             inline=True
         )
         embed.add_field(name="​", value="​", inline=False)

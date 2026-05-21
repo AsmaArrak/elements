@@ -610,6 +610,9 @@ class Battle(commands.Cog):
 
             c_all_pets = await db.get_player_pets(conn, interaction.user.id)
             o_all_pets = await db.get_player_pets(conn, opponent.id)
+            # Merge armor bonuses into each pet dict
+            c_all_pets = [await db.apply_armor_to_pet(conn, p) for p in c_all_pets]
+            o_all_pets = [await db.apply_armor_to_pet(conn, p) for p in o_all_pets]
 
         c_exp_pet_id = c_exp["pet_id"] if c_exp else None
         o_exp_pet_id = o_exp["pet_id"] if o_exp else None
