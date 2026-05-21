@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import aiosqlite
+import random
 from datetime import datetime, timezone, timedelta
 
 import database as db
@@ -9,6 +10,9 @@ from config import (
     ELEMENT_DISPLAY, ELEMENT_EMOJIS, FOOD_ITEMS, SHOP_ITEMS, STAT_ITEMS,
     DAILY_LOGIN_XP, DAILY_LOGIN_COINS
 )
+
+GAMBLE_MIN = 50
+GAMBLE_MAX = 10_000
 
 # In-memory pending trades: trade_id -> TradeState
 pending_trades: dict[int, dict] = {}
@@ -229,6 +233,81 @@ class ShopView(discord.ui.View):
             view=qty_view,
             ephemeral=True,
         )
+
+
+class CoinflipView(discord.ui.View):
+    """Two-button coin flip — user picks Heads or Tails, outcome is 50/50."""
+
+    def __init__(self, user_id: int, bet: int):
+        super().__init__(timeout=30)
+        self.user_id = user_id
+        self.bet = bet
+
+    async def _resolve(self, interaction: discord.Interaction, player_choice: str):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This isn't your flip!", ephemeral=True)
+            return
+
+        self.stop()
+
+        result = random.choice(["heads", "tails"])
+        won = player_choice == result
+        coin_emoji = "🪙" if result == "heads" else "🔄"
+
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            player = await db.get_player(conn, interaction.user.id)
+            if not player:
+                await interaction.response.edit_message(
+                    content="❌ Account not found.", embed=None, view=None
+                )
+                return
+
+            current_coins = player.get("coins") or 0
+
+            if won:
+                await conn.execute(
+                    "UPDATE players SET coins=coins+? WHERE user_id=?",
+                    (self.bet, interaction.user.id)
+                )
+                await conn.commit()
+                new_bal = current_coins + self.bet
+                embed = discord.Embed(
+                    title="🎉 You won!",
+                    description=(
+                        f"The coin landed on **{result.title()}** {coin_emoji}\n"
+                        f"You picked **{player_choice.title()}** — correct!\n\n"
+                        f"**+{self.bet:,} coins** 💰"
+                    ),
+                    color=0x2ECC71
+                )
+            else:
+                loss = min(self.bet, current_coins)
+                await conn.execute(
+                    "UPDATE players SET coins=coins-? WHERE user_id=?",
+                    (loss, interaction.user.id)
+                )
+                await conn.commit()
+                new_bal = current_coins - loss
+                embed = discord.Embed(
+                    title="😬 You lost!",
+                    description=(
+                        f"The coin landed on **{result.title()}** {coin_emoji}\n"
+                        f"You picked **{player_choice.title()}** — wrong!\n\n"
+                        f"**−{loss:,} coins** 💸"
+                    ),
+                    color=0xE74C3C
+                )
+
+        embed.set_footer(text=f"New balance: {new_bal:,} coins")
+        await interaction.response.edit_message(embed=embed, view=None)
+
+    @discord.ui.button(label="🪙 Heads", style=discord.ButtonStyle.primary)
+    async def heads(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._resolve(interaction, "heads")
+
+    @discord.ui.button(label="🔄 Tails", style=discord.ButtonStyle.secondary)
+    async def tails(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._resolve(interaction, "tails")
 
 
 class Economy(commands.Cog):
@@ -521,6 +600,97 @@ class Economy(commands.Cog):
             f"💸 {interaction.user.mention} gave **{amount} coins** to {target.mention}!"
         )
 
+
+    # ── Gambling ──────────────────────────────────────────────────────────────
+
+    @app_commands.command(name="coinflip", description="Bet coins on a coin flip — double or nothing!")
+    @app_commands.describe(bet="Amount of coins to bet (50–10,000)")
+    async def coinflip(self, interaction: discord.Interaction, bet: int):
+        if bet < GAMBLE_MIN or bet > GAMBLE_MAX:
+            await interaction.response.send_message(
+                f"Bet must be between **{GAMBLE_MIN:,}** and **{GAMBLE_MAX:,}** coins.", ephemeral=True
+            )
+            return
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            player = await db.get_player(conn, interaction.user.id)
+            if not player:
+                await interaction.response.send_message("Use `/start` first.", ephemeral=True)
+                return
+            if (player.get("coins") or 0) < bet:
+                await interaction.response.send_message(
+                    f"You only have **{player.get('coins', 0):,} coins**.", ephemeral=True
+                )
+                return
+
+        view = CoinflipView(interaction.user.id, bet)
+        embed = discord.Embed(
+            title="🪙 Coin Flip",
+            description=f"**{interaction.user.display_name}** is betting **{bet:,} coins**!\nPick your side:",
+            color=0xF1C40F
+        )
+        embed.set_footer(text="Win: +bet coins (2×) · Lose: −bet coins")
+        await interaction.response.send_message(embed=embed, view=view)
+
+    @app_commands.command(name="dice", description="Roll the dice and gamble your coins!")
+    @app_commands.describe(bet="Amount of coins to bet (50–10,000)")
+    async def dice(self, interaction: discord.Interaction, bet: int):
+        if bet < GAMBLE_MIN or bet > GAMBLE_MAX:
+            await interaction.response.send_message(
+                f"Bet must be between **{GAMBLE_MIN:,}** and **{GAMBLE_MAX:,}** coins.", ephemeral=True
+            )
+            return
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            player = await db.get_player(conn, interaction.user.id)
+            if not player:
+                await interaction.response.send_message("Use `/start` first.", ephemeral=True)
+                return
+            if (player.get("coins") or 0) < bet:
+                await interaction.response.send_message(
+                    f"You only have **{player.get('coins', 0):,} coins**.", ephemeral=True
+                )
+                return
+
+            roll = random.randint(1, 6)
+            dice_faces = {1: "1️⃣", 2: "2️⃣", 3: "3️⃣", 4: "4️⃣", 5: "5️⃣", 6: "6️⃣"}
+
+            if roll == 1:
+                # Cursed roll — lose 2× bet
+                loss = min(bet * 2, player.get("coins", 0))
+                await conn.execute(
+                    "UPDATE players SET coins=coins-? WHERE user_id=?", (loss, interaction.user.id)
+                )
+                await conn.commit()
+                color, title = 0xE74C3C, "💀 Cursed Roll!"
+                desc = f"You rolled {dice_faces[roll]} — **snake eyes!**\nYou lose **{loss:,} coins** (double penalty)! 😬"
+            elif roll <= 3:
+                # Lose bet
+                await conn.execute(
+                    "UPDATE players SET coins=coins-? WHERE user_id=?", (bet, interaction.user.id)
+                )
+                await conn.commit()
+                color, title = 0xE74C3C, "❌ Bad Roll"
+                desc = f"You rolled {dice_faces[roll]} — not good enough.\nYou lose **{bet:,} coins**."
+            elif roll <= 5:
+                # Win 2× bet
+                await conn.execute(
+                    "UPDATE players SET coins=coins+? WHERE user_id=?", (bet, interaction.user.id)
+                )
+                await conn.commit()
+                color, title = 0x2ECC71, "✅ Nice Roll!"
+                desc = f"You rolled {dice_faces[roll]} — solid!\nYou win **{bet:,} coins**!"
+            else:
+                # Roll 6 — win 3× bet
+                winnings = bet * 2
+                await conn.execute(
+                    "UPDATE players SET coins=coins+? WHERE user_id=?", (winnings, interaction.user.id)
+                )
+                await conn.commit()
+                color, title = 0xF1C40F, "🎰 JACKPOT!"
+                desc = f"You rolled {dice_faces[roll]} — **PERFECT ROLL!**\nYou win **{winnings:,} coins** (3×)! 🎉"
+
+        embed = discord.Embed(title=title, description=desc, color=color)
+        embed.set_footer(text="1=lose 2× · 2-3=lose · 4-5=win 2× · 6=win 3×")
+        await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="restart", description="Delete everything and start over from scratch")
     async def restart(self, interaction: discord.Interaction):
