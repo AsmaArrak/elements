@@ -29,6 +29,7 @@ class Help(commands.Cog):
             name="🍖 Feeding & Items",
             value=(
                 "`/feed` — Pick a pet, food, and quantity to feed (egg needs **3 feedings** to hatch!)\n"
+                "`/incubate <element>` — Place an egg from your inventory to start hatching it\n"
                 "`/inventory` — View all your items\n"
                 "`/use <stone> <element>` — Use an evo stone to evolve\n"
                 "`/claim` — Grab a randomly spawned item from the channel\n"
@@ -106,6 +107,30 @@ class Help(commands.Cog):
         embed.add_field(
             name="🎯 Party",
             value="`/setparty` — Set your battle party order (first pet starts battles)",
+            inline=False
+        )
+        embed.add_field(
+            name="👹 Weekend Boss Raid",
+            value=(
+                "`/bossbattle` — Join the active weekend boss and deal damage\n"
+                "`/bossleaderboard` — See the server damage rankings\n"
+                "*Bosses spawn every **Saturday at 10 UTC** and end **Monday midnight***\n"
+                "*Deal damage, flee to save progress, come back for more!*\n"
+                "🥇 #1: 3 Legendary armor · 1,500 coins · 📜 Legendary scroll\n"
+                "🥈 #2–3: 2 Rare armor · 750 coins · 📜 Rare scroll | 🥉 #4–10: 1 Rare armor · 📜 Uncommon scroll"
+            ),
+            inline=False
+        )
+        embed.add_field(
+            name="⚔️ Dungeons",
+            value=(
+                "`/dungeon <name>` — Farm a dungeon for armor pieces (costs **20 🌙**)\n"
+                "`/moonshard` — Check Moon Shards, regen timer & player level\n"
+                "`/upgradearmor` — Sacrifice armor pieces to level up another (1→15)\n"
+                "*🌙 Moon Shards regen +1 every 3 min · cap 120 · better loot at higher player level*\n"
+                "**5 Dungeons:** Ashen Ruins · Sunken Depths · Verdant Forge · Tempest Hollow · Void Nexus\n"
+                "*4-piece armor set bonus = +20% element damage in battle!*"
+            ),
             inline=False
         )
         embed.add_field(

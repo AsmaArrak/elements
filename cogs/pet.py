@@ -175,7 +175,7 @@ async def do_feed(pet: dict, item_key: str, user_id: int, channel) -> tuple[disc
             value=f"Level {pet['level']} | {pet['xp']}/{xp_for_next_level(pet['level'])} XP",
             inline=False
         )
-    return embed, file
+    return embed, file, stat_key, actual_boost, xp_gain
 
 
 class FeedView(discord.ui.View):
@@ -227,23 +227,42 @@ class FeedView(discord.ui.View):
         # Feed multiple times, accumulate results
         last_embed, last_file = None, None
         total_xp = 0
-        total_stat = {}
+        total_stat_boost = 0
+        total_stat_key = None
         evolved = False
 
         for _ in range(qty):
-            embed, file = await do_feed(
+            embed, file, stat_key, boost, xp_gain = await do_feed(
                 self.selected_pet, self.selected_food,
                 self.user_id, interaction.channel
             )
             last_embed, last_file = embed, file
+            total_xp += xp_gain
+            total_stat_boost += boost
+            total_stat_key = stat_key
             # Refresh pet state for next iteration
             async with aiosqlite.connect(db.DB_PATH) as conn:
                 self.selected_pet = await db.get_pet(conn, self.selected_pet["id"])
             if self.selected_pet is None:
                 break
 
-        # Show final result
+        # For bulk feeds, update the embed to show TOTAL stats/XP
         if qty > 1 and last_embed:
+            # Replace the stat/XP fields with totals
+            last_embed.clear_fields()
+            stat_display = total_stat_key.upper() if total_stat_key else "STAT"
+            last_embed.add_field(
+                name="Total Stat Boost",
+                value=f"+{total_stat_boost} {stat_display}" if total_stat_boost > 0 else f"{stat_display} is at cap!",
+                inline=True
+            )
+            last_embed.add_field(name="Total XP Gained", value=f"+{total_xp} XP", inline=True)
+            if self.selected_pet and self.selected_pet["stage"] > 0:
+                last_embed.add_field(
+                    name="Level",
+                    value=f"Level {self.selected_pet['level']} | {self.selected_pet['xp']}/{xp_for_next_level(self.selected_pet['level'])} XP",
+                    inline=False
+                )
             last_embed.set_footer(text=f"Fed ×{qty}")
 
         if last_file:
@@ -370,9 +389,29 @@ class Pet(commands.Cog):
                 await interaction.response.send_message(msg, ephemeral=True)
                 return
             all_pets = await db.get_player_pets(conn, target.id)
+            # Sync moon shards so the count is up to date
+            moon_shards = await db.sync_moon_shards(conn, target.id)
+            p = await db.get_player(conn, target.id)  # re-fetch after sync
+
+        player_level = p.get("player_level") or 1
+        from config import player_xp_for_next_level, PLAYER_LEVEL_CAP
+        p_xp = p.get("player_xp") or 0
+        p_xp_needed = player_xp_for_next_level(player_level) if player_level < PLAYER_LEVEL_CAP else 0
 
         embed, file = pet_embed(pet, target)
-        embed.set_footer(text=f"💰 {p['coins']} coins | Team: {len(all_pets)} pet(s)")
+
+        # Player-level info field
+        if player_level >= PLAYER_LEVEL_CAP:
+            p_level_val = f"**Level {player_level}** (MAX ⭐)"
+        else:
+            p_bar = hp_bar(p_xp, p_xp_needed, 10)
+            p_level_val = f"**Level {player_level}** · `{p_bar}` {p_xp}/{p_xp_needed} XP"
+        embed.add_field(
+            name="👤 Player",
+            value=f"{p_level_val}\n🌙 **{moon_shards}** Moon Shards · 💰 **{p['coins']}** coins",
+            inline=False
+        )
+        embed.set_footer(text=f"Team: {len(all_pets)} pet(s)")
 
         # Own profile is private; viewing someone else's is public
         await interaction.response.send_message(embed=embed, file=file, ephemeral=is_self)
@@ -435,6 +474,18 @@ class Pet(commands.Cog):
         embed.add_field(name="​", value="​", inline=False)
         embed.add_field(name="Stage", value=STAGE_NAMES[stage], inline=True)
         embed.add_field(name="Level", value=f"{level}/100", inline=True)
+
+        # XP progress
+        if level < 100 and stage > 0:
+            xp_needed = xp_for_next_level(level)
+            xp_bar_str = hp_bar(pet["xp"], xp_needed, 12)
+            embed.add_field(
+                name="📈 XP",
+                value=f"`{xp_bar_str}` {pet['xp']:,} / {xp_needed:,}",
+                inline=False
+            )
+        elif stage > 0:
+            embed.add_field(name="📈 XP", value="**MAX LEVEL** ⭐", inline=False)
         expl = pet['exploration']
         expl_note = " ✅ Mega unlocked!" if expl >= 100 else f" ({100 - expl} to Mega)"
         embed.add_field(name="🧭 Exploration", value=f"{expl}/100{expl_note}", inline=True)

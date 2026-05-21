@@ -28,7 +28,7 @@ UNCOMMON_LOOT = [
     (15, "ancient_fang",  "stat_item", False),
     (15, "mystic_root",   "stat_item", False),
     (15, "life_crystal",  "stat_item", False),
-    (10, "egg",           "egg",       False),
+    (35, "egg",           "egg",       False),
 ]
 
 RARE_LOOT = [
@@ -153,12 +153,11 @@ def generate_scroll_drop(duration_hrs: float, pet_element: str) -> dict | None:
     return {"skill_key": skill_key, "rarity": rarity, "name": skill["name"], "element": skill["element"]}
 
 
-def generate_armor_drop(duration_hrs: float) -> dict | None:
-    """Chance to drop one piece of armor based on expedition duration."""
+def generate_armor_drop(duration_hrs: float, pet_element: str = None) -> dict | None:
+    """Chance to drop one piece of armor from expedition — uses set-based system."""
     chance = {0.5: 0.05, 1.5: 0.15, 4: 0.38, 6: 0.60}
     if random.random() > chance.get(duration_hrs, 0.10):
         return None
-    # Pick rarity weighted by duration
     rarity_weights = {
         0.5: {"common": 88, "uncommon": 11, "rare": 1,  "legendary": 0},
         1.5: {"common": 60, "uncommon": 35, "rare": 5,  "legendary": 0},
@@ -167,9 +166,9 @@ def generate_armor_drop(duration_hrs: float) -> dict | None:
     }
     w = rarity_weights.get(duration_hrs, rarity_weights[1.5])
     rarity = random.choices(list(w.keys()), weights=list(w.values()), k=1)[0]
-    pool = ARMOR_BY_RARITY.get(rarity, ARMOR_BY_RARITY["common"])
-    name = random.choice(pool)
-    return {"name": name, "rarity": rarity, **{k: v for k, v in ARMOR_POOL[name].items() if k != "rarity"}}
+    from game.dungeon_loot import generate_armor_piece
+    element = pet_element or random.choice(ELEMENTS)
+    return generate_armor_piece(element, rarity)
 
 
 # ── Channel drops ─────────────────────────────────────────────────────────────
@@ -192,7 +191,7 @@ CHANNEL_DROPS = [
     (10, "iron_scrap",    "stat_item", None),
     (10, "swift_feather", "stat_item", None),
     (3,  "evo_stone_uncommon", "evo_stone", None),
-    (1,  "egg",       "egg",       None),
+    (15, "egg",       "egg",       None),
 ]
 
 

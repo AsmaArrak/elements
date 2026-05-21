@@ -691,17 +691,25 @@ class Expedition(commands.Cog):
                 )
 
             # Armor drop
-            armor_drop = generate_armor_drop(exp["duration_hrs"])
+            armor_drop = generate_armor_drop(exp["duration_hrs"], pet["element"])
             if armor_drop:
                 await conn.execute(
                     """INSERT INTO armor_inventory
-                       (player_id, name, rarity, bonus_hp, bonus_atk, bonus_def, bonus_spd, bonus_mgk, bonus_res)
-                       VALUES (?,?,?,?,?,?,?,?,?)""",
+                       (player_id, name, rarity, set_name, piece_type, armor_level, armor_xp, sub_stats,
+                        bonus_hp, bonus_atk, bonus_def, bonus_spd, bonus_mgk, bonus_res)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (interaction.user.id, armor_drop["name"], armor_drop["rarity"],
+                     armor_drop.get("set_name"), armor_drop.get("piece_type"), 1, 0, "[]",
                      armor_drop.get("bonus_hp", 0), armor_drop.get("bonus_atk", 0),
                      armor_drop.get("bonus_def", 0), armor_drop.get("bonus_spd", 0),
                      armor_drop.get("bonus_mgk", 0), armor_drop.get("bonus_res", 0))
                 )
+
+            # Player XP for completing expedition
+            from config import PLAYER_XP_SOURCES
+            p_xp_key = f"expedition_{dur}"
+            p_xp = PLAYER_XP_SOURCES.get(p_xp_key, 10)
+            await db.add_player_xp(conn, interaction.user.id, p_xp)
 
             # Mark expedition returned
             await conn.execute(

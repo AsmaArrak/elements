@@ -264,3 +264,109 @@ def get_stone_image(element: str, stone_type: str) -> str:
 
 def get_food_image(food_name: str) -> str:
     return os.path.join(ASSETS_PATH, "food", f"{food_name}.png")
+
+
+# ── Moon Shards ────────────────────────────────────────────────────────────────
+MOON_SHARD_REGEN_MINS = 3      # 1 shard every 3 minutes
+MOON_SHARD_CAP = 120
+DUNGEON_SHARD_COST = 20
+
+# ── Player Level ───────────────────────────────────────────────────────────────
+PLAYER_LEVEL_CAP = 60
+
+def player_xp_for_next_level(level: int) -> int:
+    """XP needed to go from `level` to `level+1`."""
+    return level * 200   # 200, 400, ..., 11800
+
+PLAYER_XP_SOURCES = {
+    "expedition_0.5": 10,
+    "expedition_1.5": 25,
+    "expedition_4":   50,
+    "expedition_6":   80,
+    "pet_levelup":    5,    # per pet level gained
+    "daily":          20,
+    "battle_win":     15,
+    "battle_loss":     5,
+    "dungeon":        30,
+}
+
+# ── Dungeons ───────────────────────────────────────────────────────────────────
+DUNGEONS = {
+    "ashen_ruins":    {"name": "Ashen Ruins",    "elements": ["ember",   "crystal"], "emoji": "🏚️"},
+    "sunken_depths":  {"name": "Sunken Depths",  "elements": ["tide",    "toxin"],   "emoji": "🌊"},
+    "verdant_forge":  {"name": "Verdant Forge",  "elements": ["bloom",   "forge"],   "emoji": "🌿"},
+    "tempest_hollow": {"name": "Tempest Hollow", "elements": ["storm",   "phantom"], "emoji": "⚡"},
+    "void_nexus":     {"name": "Void Nexus",     "elements": ["cosmic",  "void"],    "emoji": "🌌"},
+}
+
+# ── Armor Sets (element → set info) ───────────────────────────────────────────
+ARMOR_SETS = {
+    "ember":   {"name": "Embercrown",  "set_bonus": "Ember DMG +20%"},
+    "crystal": {"name": "Frostplate",  "set_bonus": "Crystal DMG +20%"},
+    "tide":    {"name": "Tidecaller",  "set_bonus": "Tide DMG +20%"},
+    "toxin":   {"name": "Venomweave",  "set_bonus": "Toxin DMG +20%"},
+    "bloom":   {"name": "Thornbloom",  "set_bonus": "Bloom DMG +20%"},
+    "forge":   {"name": "Ironforge",   "set_bonus": "Forge DMG +20%"},
+    "storm":   {"name": "Stormrift",   "set_bonus": "Storm DMG +20%"},
+    "phantom": {"name": "Wraithveil",  "set_bonus": "Phantom DMG +20%"},
+    "cosmic":  {"name": "Starbound",   "set_bonus": "Cosmic DMG +20%"},
+    "void":    {"name": "Voidcloak",   "set_bonus": "Void DMG +20%"},
+}
+
+ARMOR_PIECES = ["Crown", "Plate", "Gauntlets", "Greaves"]
+
+# Main stat options per piece type
+ARMOR_PIECE_MAIN_STATS = {
+    "Crown":     ["mgk", "hp"],
+    "Plate":     ["hp",  "def"],
+    "Gauntlets": ["atk", "mgk"],
+    "Greaves":   ["spd", "def"],
+}
+
+# Base main-stat values at level 1 by rarity
+ARMOR_BASE_VALUES = {
+    "common":    {"hp": 20,  "atk": 8,  "def": 8,  "spd": 4,  "mgk": 8,  "res": 8},
+    "uncommon":  {"hp": 35,  "atk": 14, "def": 14, "spd": 7,  "mgk": 14, "res": 14},
+    "rare":      {"hp": 55,  "atk": 22, "def": 22, "spd": 11, "mgk": 22, "res": 22},
+    "legendary": {"hp": 80,  "atk": 32, "def": 32, "spd": 16, "mgk": 32, "res": 32},
+}
+
+# Stat multiplier per armor level (level 1 = 1.0x, level 15 = 3.0x)
+ARMOR_LEVEL_MULT = {i: round(1.0 + (i - 1) * (2.0 / 14), 3) for i in range(1, 16)}
+
+# XP needed to go from level N to N+1
+ARMOR_LEVEL_XP = {
+    1: 150,  2: 250,  3: 400,  4: 600,  5: 800,
+    6: 1100, 7: 1400, 8: 1800, 9: 2300, 10: 2900,
+    11: 3600, 12: 4400, 13: 5300, 14: 6500,
+}
+
+# Coins to upgrade armor from level N to N+1
+ARMOR_UPGRADE_COINS = {
+    1: 500,  2: 800,  3: 1200,  4: 1800,  5: 2500,
+    6: 3500, 7: 4500, 8: 6000,  9: 8000,  10: 10000,
+    11: 12500, 12: 15000, 13: 18000, 14: 22000,
+}
+
+# XP gained when used as upgrade fodder
+ARMOR_FODDER_XP = {
+    "common": 100, "uncommon": 300, "rare": 800, "legendary": 2000,
+}
+
+# Substat value ranges by rarity
+ARMOR_SUBSTAT_RANGES = {
+    "common":    {"hp": (5,  15), "atk": (2, 6),  "def": (2, 6),  "spd": (1, 3),  "mgk": (2, 6),  "res": (2, 6)},
+    "uncommon":  {"hp": (10, 25), "atk": (4, 10), "def": (4, 10), "spd": (2, 5),  "mgk": (4, 10), "res": (4, 10)},
+    "rare":      {"hp": (20, 45), "atk": (7, 18), "def": (7, 18), "spd": (3, 8),  "mgk": (7, 18), "res": (7, 18)},
+    "legendary": {"hp": (35, 70), "atk": (12,30), "def": (12,30), "spd": (5, 12), "mgk": (12,30), "res": (12,30)},
+}
+
+# Levels at which a new substat is unlocked
+ARMOR_SUBSTAT_UNLOCK_LEVELS = {3, 6, 9, 12}
+
+# Dungeon rarity weights by player level tier
+DUNGEON_RARITY_WEIGHTS = {
+    "tier1": {"common": 50, "uncommon": 35, "rare": 14, "legendary": 1},
+    "tier2": {"common": 20, "uncommon": 40, "rare": 35, "legendary": 5},
+    "tier3": {"common": 5,  "uncommon": 25, "rare": 50, "legendary": 20},
+}

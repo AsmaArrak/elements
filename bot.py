@@ -26,6 +26,8 @@ COGS = [
     "cogs.party",
     "cogs.armor",
     "cogs.skills_cmd",
+    "cogs.dungeon",
+    "cogs.boss",
 ]
 
 

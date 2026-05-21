@@ -162,6 +162,61 @@ async def init_db():
             await db.commit()
         except Exception:
             pass
+        # Migration: player level, XP, moon shards
+        for col_sql in [
+            "ALTER TABLE players ADD COLUMN player_level INTEGER DEFAULT 1",
+            "ALTER TABLE players ADD COLUMN player_xp    INTEGER DEFAULT 0",
+            "ALTER TABLE players ADD COLUMN moon_shards  INTEGER DEFAULT 60",
+            "ALTER TABLE players ADD COLUMN last_shard_time TEXT",
+        ]:
+            try:
+                await db.execute(col_sql)
+                await db.commit()
+            except Exception:
+                pass
+        # Boss battle tables
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS boss_battles (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                boss_name    TEXT NOT NULL,
+                boss_element TEXT NOT NULL,
+                spawn_time   TEXT NOT NULL,
+                end_time     TEXT NOT NULL,
+                active       INTEGER DEFAULT 1,
+                total_damage INTEGER DEFAULT 0,
+                rewards_given INTEGER DEFAULT 0
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS boss_damage_log (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                boss_id   INTEGER NOT NULL,
+                player_id INTEGER NOT NULL,
+                damage    INTEGER DEFAULT 0,
+                UNIQUE(boss_id, player_id),
+                FOREIGN KEY (boss_id) REFERENCES boss_battles(id)
+            )
+        """)
+        await db.commit()
+        # Migration: boss channel per guild
+        try:
+            await db.execute("ALTER TABLE guild_config ADD COLUMN boss_channel_id INTEGER")
+            await db.commit()
+        except Exception:
+            pass
+        # Migration: armor upgrade columns
+        for col_sql in [
+            "ALTER TABLE armor_inventory ADD COLUMN armor_level INTEGER DEFAULT 1",
+            "ALTER TABLE armor_inventory ADD COLUMN armor_xp    INTEGER DEFAULT 0",
+            "ALTER TABLE armor_inventory ADD COLUMN set_name    TEXT",
+            "ALTER TABLE armor_inventory ADD COLUMN piece_type  TEXT",
+            "ALTER TABLE armor_inventory ADD COLUMN sub_stats   TEXT DEFAULT '[]'",
+        ]:
+            try:
+                await db.execute(col_sql)
+                await db.commit()
+            except Exception:
+                pass
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -319,3 +374,80 @@ async def get_active_expedition(db: aiosqlite.Connection, player_id: int) -> dic
 
 async def connect() -> aiosqlite.Connection:
     return await aiosqlite.connect(DB_PATH)
+
+
+# ── Player XP / Level ─────────────────────────────────────────────────────────
+
+async def add_player_xp(db: aiosqlite.Connection, user_id: int, amount: int) -> tuple[int, int, bool]:
+    """Add player XP and handle level-ups. Returns (new_level, new_xp, leveled_up)."""
+    from config import player_xp_for_next_level, PLAYER_LEVEL_CAP
+    player = await get_player(db, user_id)
+    if not player:
+        return 1, 0, False
+    level = player.get("player_level") or 1
+    xp = (player.get("player_xp") or 0) + amount
+    leveled_up = False
+    while level < PLAYER_LEVEL_CAP:
+        needed = player_xp_for_next_level(level)
+        if xp >= needed:
+            xp -= needed
+            level += 1
+            leveled_up = True
+        else:
+            break
+    await db.execute(
+        "UPDATE players SET player_level=?, player_xp=? WHERE user_id=?",
+        (level, xp, user_id)
+    )
+    return level, xp, leveled_up
+
+
+# ── Moon Shards ───────────────────────────────────────────────────────────────
+
+async def sync_moon_shards(db: aiosqlite.Connection, user_id: int) -> int:
+    """Compute current moon shards including passive regen. Updates DB and returns current count."""
+    from config import MOON_SHARD_REGEN_MINS, MOON_SHARD_CAP
+    player = await get_player(db, user_id)
+    if not player:
+        return 0
+    current = player.get("moon_shards") or 0
+    last_str = player.get("last_shard_time")
+    now = datetime.now(timezone.utc)
+    if current < MOON_SHARD_CAP and last_str:
+        try:
+            last = datetime.fromisoformat(last_str)
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=timezone.utc)
+            elapsed_mins = (now - last).total_seconds() / 60
+            gained = int(elapsed_mins / MOON_SHARD_REGEN_MINS)
+            if gained > 0:
+                current = min(MOON_SHARD_CAP, current + gained)
+                await db.execute(
+                    "UPDATE players SET moon_shards=?, last_shard_time=? WHERE user_id=?",
+                    (current, now.isoformat(), user_id)
+                )
+                await db.commit()
+        except Exception:
+            pass
+    elif last_str is None:
+        # First time — set the clock
+        await db.execute(
+            "UPDATE players SET last_shard_time=? WHERE user_id=?",
+            (now.isoformat(), user_id)
+        )
+        await db.commit()
+    return current
+
+
+async def spend_moon_shards(db: aiosqlite.Connection, user_id: int, amount: int) -> bool:
+    """Spend moon shards. Returns False if insufficient."""
+    current = await sync_moon_shards(db, user_id)
+    if current < amount:
+        return False
+    now = datetime.now(timezone.utc)
+    await db.execute(
+        "UPDATE players SET moon_shards=moon_shards-?, last_shard_time=? WHERE user_id=?",
+        (amount, now.isoformat(), user_id)
+    )
+    await db.commit()
+    return True
