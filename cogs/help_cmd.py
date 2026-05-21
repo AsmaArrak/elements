@@ -116,8 +116,9 @@ class Help(commands.Cog):
                 "`/bossleaderboard` — See the server damage rankings\n"
                 "*Bosses spawn every **Saturday at 10 UTC** and end **Monday midnight***\n"
                 "*Deal damage, flee to save progress, come back for more!*\n"
-                "🥇 #1: 3 Legendary armor · 1,500 coins · 📜 Legendary scroll\n"
-                "🥈 #2–3: 2 Rare armor · 750 coins · 📜 Rare scroll | 🥉 #4–10: 1 Rare armor · 📜 Uncommon scroll"
+                "🥇 #1: 35,000 coins · 3 Legendary armor · 📜 Legendary scroll\n"
+                "🥈 #2: 20,000 coins · 2 Rare armor · 📜 Rare scroll | 🥉 #3: 12,000 coins · 1 Rare armor · 📜 Rare scroll\n"
+                "⚔️ #4+: 8,000 coins · 1 Uncommon armor · 📜 Common scroll"
             ),
             inline=False
         )

@@ -124,10 +124,10 @@ BOSS_DEFINITIONS = [
 
 # ── Reward tiers: (rank_min, rank_max, coins, armor_count, armor_rarity, scroll_rarity)
 BOSS_REWARD_TIERS = [
-    (1,  1,   1500, 3, "legendary", "legendary"),
-    (2,  3,   750,  2, "rare",      "rare"),
-    (4,  10,  350,  1, "rare",      "uncommon"),
-    (11, 999, 150,  1, "uncommon",  "common"),
+    (1,  1,   35000, 3, "legendary", "legendary"),
+    (2,  2,   20000, 2, "rare",      "rare"),
+    (3,  3,   12000, 1, "rare",      "rare"),
+    (4,  999, 8000,  1, "uncommon",  "common"),
 ]
 
 
@@ -627,10 +627,10 @@ class Boss(commands.Cog):
         embed.add_field(
             name="🎁 Reward Tiers",
             value=(
-                "🥇 **#1 —** 1,500 coins · 3 Legendary armor pieces · 📜 Legendary scroll\n"
-                "🥈 **#2–3 —** 750 coins · 2 Rare armor pieces · 📜 Rare scroll\n"
-                "🥉 **#4–10 —** 350 coins · 1 Rare armor piece · 📜 Uncommon scroll\n"
-                "⚔️ **#11+ —** 150 coins · 1 Uncommon armor piece · 📜 Common scroll"
+                "🥇 **#1 —** 35,000 coins · 3 Legendary armor pieces · 📜 Legendary scroll\n"
+                "🥈 **#2 —** 20,000 coins · 2 Rare armor pieces · 📜 Rare scroll\n"
+                "🥉 **#3 —** 12,000 coins · 1 Rare armor piece · 📜 Rare scroll\n"
+                "⚔️ **#4+ —** 8,000 coins · 1 Uncommon armor piece · 📜 Common scroll"
             ),
             inline=False,
         )
