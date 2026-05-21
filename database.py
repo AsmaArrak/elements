@@ -263,30 +263,39 @@ ARMOR_SLOT_COLS = {
 }
 
 async def apply_armor_to_pet(db: aiosqlite.Connection, pet: dict) -> dict:
-    """Fetch all 4 equipped armor slots, sum their stat bonuses into armor_bonus_X keys,
-    and store the full piece rows in pet['equipped_pieces'] for display."""
+    """Fetch all 4 equipped armor slots, apply level scaling + substats via
+    effective_armor_stats(), and store totals in armor_bonus_X keys.
+    Also stores full piece rows in pet['equipped_pieces'] for display."""
+    from game.dungeon_loot import effective_armor_stats
+
     pet = dict(pet)  # don't mutate original
     for s in ("hp", "atk", "def", "spd", "mgk", "res"):
         pet[f"armor_bonus_{s}"] = 0
     pet["equipped_pieces"] = []
 
-    stat_cols = ("bonus_hp", "bonus_atk", "bonus_def", "bonus_spd", "bonus_mgk", "bonus_res",
-                 "name", "rarity", "piece_type", "set_name", "armor_level", "sub_stats")
-    stat_keys = ("hp", "atk", "def", "spd", "mgk", "res")
+    fetch_cols = (
+        "id", "bonus_hp", "bonus_atk", "bonus_def", "bonus_spd", "bonus_mgk", "bonus_res",
+        "name", "rarity", "piece_type", "set_name", "armor_level", "sub_stats"
+    )
 
     for piece_type, col in ARMOR_SLOT_COLS.items():
         armor_id = pet.get(col)
         if not armor_id:
             continue
         async with db.execute(
-            f"SELECT {', '.join(stat_cols)} FROM armor_inventory WHERE id=?", (armor_id,)
+            f"SELECT {', '.join(fetch_cols)} FROM armor_inventory WHERE id=?", (armor_id,)
         ) as cur:
             row = await cur.fetchone()
-        if row:
-            for i, s in enumerate(stat_keys):
-                pet[f"armor_bonus_{s}"] += row[i] or 0
-            piece = dict(zip(stat_cols, row))
-            pet["equipped_pieces"].append(piece)
+        if not row:
+            continue
+        piece = dict(zip(fetch_cols, row))
+        # Apply level multiplier + substats
+        scaled = effective_armor_stats(piece)
+        for s in ("hp", "atk", "def", "spd", "mgk", "res"):
+            pet[f"armor_bonus_{s}"] += scaled.get(f"bonus_{s}", 0)
+        # Store piece with its scaled stats for display
+        piece["scaled"] = scaled
+        pet["equipped_pieces"].append(piece)
 
     return pet
 
