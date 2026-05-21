@@ -171,7 +171,7 @@ async def init_db():
         for col_sql in [
             "ALTER TABLE players ADD COLUMN player_level INTEGER DEFAULT 1",
             "ALTER TABLE players ADD COLUMN player_xp    INTEGER DEFAULT 0",
-            "ALTER TABLE players ADD COLUMN moon_shards  INTEGER DEFAULT 60",
+            "ALTER TABLE players ADD COLUMN moon_shards  INTEGER DEFAULT 120",
             "ALTER TABLE players ADD COLUMN last_shard_time TEXT",
         ]:
             try:
@@ -179,6 +179,12 @@ async def init_db():
                 await db.commit()
             except Exception:
                 pass
+        # Fix players stuck at the old default of 60 — bump to 120
+        try:
+            await db.execute("UPDATE players SET moon_shards=120 WHERE moon_shards=60 AND last_shard_time IS NULL")
+            await db.commit()
+        except Exception:
+            pass
         # Boss battle tables
         await db.execute("""
             CREATE TABLE IF NOT EXISTS boss_battles (
