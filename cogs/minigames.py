@@ -138,9 +138,9 @@ TRIVIA_QUESTIONS = [
     {"q": "What is the maximum number of rounds in a standard Valorant match?", "choices": ["24", "25", "30", "13"], "answer": 1},
     {"q": "Which agent is known for using smoke screens in Valorant?", "choices": ["Phoenix", "Omen", "Sage", "Breach"], "answer": 1},
     {"q": "What country is Reyna from in Valorant?", "choices": ["Spain", "Argentina", "Mexico", "Colombia"], "answer": 2},
-    {"q": "Which Valorant agent can use a grappling hook?", "choices": ["Neon", "Jett", "Raze", "Chamber"], "answer": 2},
+    {"q": "Which Valorant agent can sprint and slide at high speed?", "choices": ["Jett", "Neon", "Raze", "Phoenix"], "answer": 1},
     {"q": "What is the starting pistol in Valorant called?", "choices": ["Ghost", "Sheriff", "Classic", "Frenzy"], "answer": 2},
-    {"q": "Which Valorant agent is from Sweden?", "choices": ["Killjoy", "Sage", "Chamber", "Sova"], "answer": 0},
+    {"q": "Which Valorant agent is from Germany?", "choices": ["Chamber", "Sova", "Killjoy", "Cypher"], "answer": 2},
     {"q": "What type of agent is Sova classified as in Valorant?", "choices": ["Duelist", "Controller", "Initiator", "Sentinel"], "answer": 2},
     {"q": "Which gun in Valorant is known as the 'op' (overpowered sniper)?", "choices": ["Marshal", "Guardian", "Operator", "Outlaw"], "answer": 2},
     {"q": "What is Neon's nationality in Valorant?", "choices": ["Thai", "Filipino", "Vietnamese", "Indonesian"], "answer": 1},
@@ -149,7 +149,7 @@ TRIVIA_QUESTIONS = [
     {"q": "Which agent in Valorant uses a crossbow?", "choices": ["Sova", "Cypher", "Fade", "Harbor"], "answer": 0},
     {"q": "What is Jett's dash ability called?", "choices": ["Tailwind", "Updraft", "Cloudburst", "Drift"], "answer": 0},
     {"q": "Which Valorant agent can use a 'Spycam'?", "choices": ["Killjoy", "Cypher", "Sage", "Chamber"], "answer": 1},
-    {"q": "How many maps were available at Valorant's launch?", "choices": ["3", "4", "5", "6"], "answer": 2},
+    {"q": "Which Valorant map has THREE bomb sites (A, B, and C)?", "choices": ["Bind", "Split", "Haven", "Ascent"], "answer": 2},
     {"q": "What is the Valorant rank above Diamond?", "choices": ["Platinum", "Immortal", "Ascendant", "Radiant"], "answer": 2},
 ]
 
