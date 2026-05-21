@@ -122,11 +122,29 @@ class Inventory(commands.Cog):
         embed.set_footer(text=f"💰 {player['coins']} coins")
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="use", description="Use an evolution stone or stat item on your active pet")
+    async def use_autocomplete(self, interaction: discord.Interaction, current: str):
+        choices = []
+        # Stat items
+        for key, info in STAT_ITEMS.items():
+            label = f"{info['display']} — {info['desc']}"
+            if current.lower() in key.lower() or current.lower() in label.lower():
+                choices.append(app_commands.Choice(name=label[:100], value=key))
+        # Evo stones
+        for key, label in [
+            ("evo_stone_uncommon", "Uncommon Evo Stone — evolves Evo 1 → Evo 2"),
+            ("evo_stone_rare",     "Rare Evo Stone — evolves Evo 2 → Evo 3"),
+            ("mega_stone",         "Mega Stone ⭐ — evolves Evo 3 → Mega"),
+        ]:
+            if current.lower() in key.lower() or current.lower() in label.lower():
+                choices.append(app_commands.Choice(name=label[:100], value=key))
+        return choices[:25]
+
+    @app_commands.command(name="use", description="Use a stat item or evolution stone on your active pet")
     @app_commands.describe(
-        item="Item to use: evo_stone_uncommon, evo_stone_rare, mega_stone, or a stat item name",
+        item="Pick a stat item or evo stone from the list",
         element="Element of the stone (required for evo/mega stones)"
     )
+    @app_commands.autocomplete(item=use_autocomplete)
     async def use(self, interaction: discord.Interaction, item: str, element: str = None):
         item = item.lower().strip()
         if element:
@@ -169,10 +187,18 @@ class Inventory(commands.Cog):
                 await conn.commit()
 
                 name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
-                cap_note = " *(stat is at cap)*" if capped and actual == 0 else ""
+                from config import stat_cap
+                new_bonus = pet[f"bonus_{stat_key}"] + actual
+                new_total = pet[f"base_{stat_key}"] + new_bonus
+                cap_val = stat_cap(pet[f"base_{stat_key}"], pet["level"])
+                if actual == 0:
+                    result_line = f"⛔ {stat_key.upper()} is already at cap! **{new_total}/{cap_val}**"
+                elif capped:
+                    result_line = f"+{actual} {stat_key.upper()} *(cap reached)* → **{new_total}/{cap_val}**"
+                else:
+                    result_line = f"+{actual} {stat_key.upper()} → **{new_total}/{cap_val}**"
                 await interaction.response.send_message(
-                    f"Used **{STAT_ITEMS[item]['display']}** on **{name}**!\n"
-                    f"+{actual} **{stat_key.upper()}**{cap_note}"
+                    f"✅ Used **{STAT_ITEMS[item]['display']}** on **{name}**!\n{result_line}"
                 )
                 return
 
