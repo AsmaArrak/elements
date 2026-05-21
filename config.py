@@ -267,7 +267,7 @@ def get_food_image(food_name: str) -> str:
 
 
 # ── Moon Shards ────────────────────────────────────────────────────────────────
-MOON_SHARD_REGEN_MINS = 1      # 1 shard every 1 minute
+MOON_SHARD_REGEN_MINS = 2      # 1 shard every 2 minutes
 MOON_SHARD_CAP = 120
 DUNGEON_SHARD_COST = 20
 
