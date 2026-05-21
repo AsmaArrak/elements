@@ -100,6 +100,137 @@ class TradeOfferView(discord.ui.View):
         )
 
 
+# ── Shop UI ───────────────────────────────────────────────────────────────────
+
+class CustomAmountModal(discord.ui.Modal, title="Custom Amount"):
+    amount = discord.ui.TextInput(
+        label="How many to buy? (1–99)",
+        placeholder="e.g. 15",
+        min_length=1,
+        max_length=2,
+    )
+
+    def __init__(self, qty_view: "QuantityView"):
+        super().__init__()
+        self.qty_view = qty_view
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            qty = int(self.amount.value)
+            if qty < 1 or qty > 99:
+                raise ValueError
+        except ValueError:
+            await interaction.response.send_message("Enter a number between 1 and 99.", ephemeral=True)
+            return
+        await self.qty_view.do_purchase(interaction, qty)
+
+
+class QuantityView(discord.ui.View):
+    def __init__(self, user_id: int, item_key: str, price: int, display: str, item_type: str, coins: int):
+        super().__init__(timeout=30)
+        self.user_id = user_id
+        self.item_key = item_key
+        self.price = price
+        self.display = display
+        self.item_type = item_type
+
+        for qty in [1, 5, 10, 25, 50]:
+            total = qty * price
+            affordable = total <= coins
+
+            def make_cb(q):
+                async def cb(inter: discord.Interaction):
+                    await self.do_purchase(inter, q)
+                return cb
+
+            btn = discord.ui.Button(
+                label=f"×{qty}  ({total:,}c)",
+                style=discord.ButtonStyle.success if affordable else discord.ButtonStyle.secondary,
+                disabled=not affordable,
+                row=0,
+            )
+            btn.callback = make_cb(qty)
+            self.add_item(btn)
+
+    @discord.ui.button(label="✏️ Custom", style=discord.ButtonStyle.secondary, row=1)
+    async def custom_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your shop!", ephemeral=True)
+            return
+        await interaction.response.send_modal(CustomAmountModal(self))
+
+    async def do_purchase(self, interaction: discord.Interaction, qty: int):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your shop!", ephemeral=True)
+            return
+        total = qty * self.price
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            player = await db.get_player(conn, self.user_id)
+            if not player or player["coins"] < total:
+                have = player["coins"] if player else 0
+                await interaction.response.edit_message(
+                    content=f"❌ Not enough coins! Need **{total:,}**, you have **{have:,}**.",
+                    view=None,
+                )
+                return
+            await conn.execute(
+                "UPDATE players SET coins=coins-? WHERE user_id=?", (total, self.user_id)
+            )
+            await db.add_item(conn, self.user_id, self.item_key, self.item_type, qty)
+            await conn.commit()
+            new_bal = player["coins"] - total
+
+        await interaction.response.edit_message(
+            content=(
+                f"✅ Bought **×{qty} {self.display}** for **{total:,} coins**!\n"
+                f"💰 Balance: **{new_bal:,} coins**"
+            ),
+            view=None,
+        )
+
+
+class ShopView(discord.ui.View):
+    def __init__(self, user_id: int, coins: int):
+        super().__init__(timeout=60)
+        self.user_id = user_id
+        self.coins = coins
+
+        options = []
+        for key, data in SHOP_ITEMS.items():
+            food = FOOD_ITEMS.get(key, {})
+            display = food.get("display", key.title())
+            options.append(discord.SelectOption(
+                label=display,
+                value=key,
+                description=f"{data['price']} coins · {data['description']}",
+            ))
+
+        self.item_select = discord.ui.Select(
+            placeholder="🛒 Choose an item to buy...",
+            options=options,
+        )
+        self.item_select.callback = self.on_item_select
+        self.add_item(self.item_select)
+
+    async def on_item_select(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your shop!", ephemeral=True)
+            return
+        item_key = self.item_select.values[0]
+        data = SHOP_ITEMS[item_key]
+        food = FOOD_ITEMS.get(item_key, {})
+        display = food.get("display", item_key.title())
+        item_type = data.get("type", "food")
+        price = data["price"]
+
+        qty_view = QuantityView(self.user_id, item_key, price, display, item_type, self.coins)
+        await interaction.response.send_message(
+            f"**{display}** — {price:,} coins each · You have **{self.coins:,} coins**\nHow many?",
+            view=qty_view,
+            ephemeral=True,
+        )
+
+
 class Economy(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -117,15 +248,22 @@ class Economy(commands.Cog):
 
     @app_commands.command(name="shop", description="Browse the item shop")
     async def shop(self, interaction: discord.Interaction):
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            player = await db.get_player(conn, interaction.user.id)
+        coins = player["coins"] if player else 0
+
         embed = discord.Embed(title="🛒 Item Shop", color=0xF1C40F)
         lines = []
         for key, data in SHOP_ITEMS.items():
             food_data = FOOD_ITEMS.get(key, {})
             display = food_data.get("display", key.title())
-            lines.append(f"**{display}** — {data['price']} coins | {data['description']}")
+            lines.append(f"**{display}** — {data['price']:,} coins | {data['description']}")
         embed.add_field(name="🍖 Food", value="\n".join(lines), inline=False)
-        embed.set_footer(text="Buy with /buy <item>  |  Rare items (cake, honey) only drop from the world")
-        await interaction.response.send_message(embed=embed)
+        embed.set_footer(text="Rare items (cake, honey, dragonfruit…) only drop from the world")
+        embed.set_footer(text=f"💰 Your balance: {coins:,} coins · Select an item below to buy in bulk")
+
+        view = ShopView(interaction.user.id, coins)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @app_commands.command(name="buy", description="Buy an item from the shop")
     @app_commands.describe(
