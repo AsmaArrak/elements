@@ -134,6 +134,11 @@ async def init_db():
         for col_sql in [
             "ALTER TABLE players ADD COLUMN last_trivia TEXT",
             "ALTER TABLE pets ADD COLUMN equipped_armor INTEGER DEFAULT NULL",
+            # 4 dedicated armor slots (one per piece type)
+            "ALTER TABLE pets ADD COLUMN slot_crown     INTEGER DEFAULT NULL",
+            "ALTER TABLE pets ADD COLUMN slot_plate     INTEGER DEFAULT NULL",
+            "ALTER TABLE pets ADD COLUMN slot_gauntlets INTEGER DEFAULT NULL",
+            "ALTER TABLE pets ADD COLUMN slot_greaves   INTEGER DEFAULT NULL",
         ]:
             try:
                 await db.execute(col_sql)
@@ -249,22 +254,54 @@ async def get_pet(db: aiosqlite.Connection, pet_id: int) -> dict | None:
             return dict(zip(cols, row))
     return None
 
+# Mapping from piece_type name → pets table column
+ARMOR_SLOT_COLS = {
+    "Crown":     "slot_crown",
+    "Plate":     "slot_plate",
+    "Gauntlets": "slot_gauntlets",
+    "Greaves":   "slot_greaves",
+}
+
 async def apply_armor_to_pet(db: aiosqlite.Connection, pet: dict) -> dict:
-    """Fetch equipped armor stats and add them to the pet dict as armor_bonus_X keys."""
+    """Fetch all 4 equipped armor slots, sum their stat bonuses into armor_bonus_X keys,
+    and store the full piece rows in pet['equipped_pieces'] for display."""
     pet = dict(pet)  # don't mutate original
     for s in ("hp", "atk", "def", "spd", "mgk", "res"):
         pet[f"armor_bonus_{s}"] = 0
-    armor_id = pet.get("equipped_armor")
-    if armor_id:
+    pet["equipped_pieces"] = []
+
+    stat_cols = ("bonus_hp", "bonus_atk", "bonus_def", "bonus_spd", "bonus_mgk", "bonus_res",
+                 "name", "rarity", "piece_type", "set_name", "armor_level", "sub_stats")
+    stat_keys = ("hp", "atk", "def", "spd", "mgk", "res")
+
+    for piece_type, col in ARMOR_SLOT_COLS.items():
+        armor_id = pet.get(col)
+        if not armor_id:
+            continue
         async with db.execute(
-            "SELECT bonus_hp, bonus_atk, bonus_def, bonus_spd, bonus_mgk, bonus_res "
-            "FROM armor_inventory WHERE id=?", (armor_id,)
+            f"SELECT {', '.join(stat_cols)} FROM armor_inventory WHERE id=?", (armor_id,)
         ) as cur:
             row = await cur.fetchone()
         if row:
-            for i, s in enumerate(("hp", "atk", "def", "spd", "mgk", "res")):
-                pet[f"armor_bonus_{s}"] = row[i] or 0
+            for i, s in enumerate(stat_keys):
+                pet[f"armor_bonus_{s}"] += row[i] or 0
+            piece = dict(zip(stat_cols, row))
+            pet["equipped_pieces"].append(piece)
+
     return pet
+
+async def unequip_armor_id(db: aiosqlite.Connection, armor_id: int, player_id: int):
+    """Remove an armor piece from whichever pet slot it occupies."""
+    for col in ARMOR_SLOT_COLS.values():
+        await db.execute(
+            f"UPDATE pets SET {col}=NULL WHERE {col}=? AND player_id=?",
+            (armor_id, player_id)
+        )
+    # Legacy single-slot compat
+    await db.execute(
+        "UPDATE pets SET equipped_armor=NULL WHERE equipped_armor=? AND player_id=?",
+        (armor_id, player_id)
+    )
 
 async def get_active_pet(db: aiosqlite.Connection, user_id: int) -> dict | None:
     async with db.execute(

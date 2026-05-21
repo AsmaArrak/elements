@@ -540,30 +540,36 @@ class Pet(commands.Cog):
             expl_desc = f"**{expl_val}/100**\n*Increases by going on expeditions. Reach **100** to unlock Mega Stone drops!*"
         embed.add_field(name="🧭 Exploration", value=expl_desc, inline=False)
 
-        # Equipped armor
-        armor_id = pet.get("equipped_armor")
-        if armor_id:
-            async with aiosqlite.connect(db.DB_PATH) as conn:
-                async with conn.execute(
-                    "SELECT name, rarity, bonus_hp, bonus_atk, bonus_def, bonus_spd, bonus_mgk, bonus_res FROM armor_inventory WHERE id=?",
-                    (armor_id,)
-                ) as cur:
-                    ar = await cur.fetchone()
-            if ar:
-                from config import RARITY_EMOJIS
-                r_emoji = RARITY_EMOJIS.get(ar[1], "")
-                bonuses = []
-                labels = [("HP", ar[2]), ("ATK", ar[3]), ("DEF", ar[4]), ("SPD", ar[5]), ("MGK", ar[6]), ("RES", ar[7])]
-                for stat, val in labels:
-                    if val:
-                        bonuses.append(f"+{val} {stat}")
-                embed.add_field(
-                    name="🛡️ Equipped Armor",
-                    value=f"{r_emoji} **{ar[0]}** *({ar[1]})*\n{' · '.join(bonuses)}",
-                    inline=False
-                )
+        # Equipped armor — all 4 slots
+        from config import RARITY_EMOJIS, ELEMENT_EMOJIS as ELEM_EMOJIS
+        pieces = pet.get("equipped_pieces", [])
+        if pieces:
+            armor_lines = []
+            for p in sorted(pieces, key=lambda x: ["Crown","Plate","Gauntlets","Greaves"].index(x.get("piece_type","Crown")) if x.get("piece_type") in ["Crown","Plate","Gauntlets","Greaves"] else 99):
+                r_emoji = RARITY_EMOJIS.get(p["rarity"], "⚪")
+                elem_e = ELEM_EMOJIS.get(p.get("set_name",""), "")
+                main_bonuses = []
+                for s in ("hp","atk","def","spd","mgk","res"):
+                    v = p.get(f"bonus_{s}", 0)
+                    if v:
+                        main_bonuses.append(f"+{v} {s.upper()}")
+                # Substats
+                import json as _json
+                sub_stats = _json.loads(p.get("sub_stats") or "[]")
+                sub_parts = [f"+{ss['value']} {ss['stat'].upper()}" for ss in sub_stats]
+                lv = p.get("armor_level", 1)
+                line = f"{r_emoji}{elem_e} **{p['name']}** Lv{lv}\n"
+                line += "  " + " · ".join(main_bonuses) if main_bonuses else "  —"
+                if sub_parts:
+                    line += "\n  ✨ " + " · ".join(sub_parts)
+                armor_lines.append(line)
+            embed.add_field(
+                name="🛡️ Equipped Armor",
+                value="\n".join(armor_lines),
+                inline=False
+            )
         else:
-            embed.add_field(name="🛡️ Equipped Armor", value="*None — use `/equip` to equip armor*", inline=False)
+            embed.add_field(name="🛡️ Equipped Armor", value="*None — use `/equip` to equip armor*\n*(Each piece type goes in its own slot: Crown, Plate, Gauntlets, Greaves)*", inline=False)
 
         image_path = get_pet_image(element, variant, stage)
         file = discord.File(image_path, filename="pet.png")

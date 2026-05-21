@@ -91,20 +91,31 @@ class EquipView(discord.ui.View):
             return
         self.stop()
         async with aiosqlite.connect(db.DB_PATH) as conn:
+            async with conn.execute(
+                "SELECT name, rarity, piece_type FROM armor_inventory WHERE id=?",
+                (self.selected_armor_id,)
+            ) as cur:
+                ar = await cur.fetchone()
+            if not ar:
+                await interaction.response.send_message("Armor not found.", ephemeral=True)
+                return
+            piece_type = ar[2] or ""
+            slot_col = db.ARMOR_SLOT_COLS.get(piece_type)
+            if not slot_col:
+                await interaction.response.send_message(
+                    f"Unknown piece type '{piece_type}'. Cannot equip.", ephemeral=True
+                )
+                return
             await conn.execute(
-                "UPDATE pets SET equipped_armor=? WHERE id=?",
+                f"UPDATE pets SET {slot_col}=? WHERE id=?",
                 (self.selected_armor_id, self.selected_pet["id"])
             )
             await conn.commit()
-            async with conn.execute(
-                "SELECT name, rarity FROM armor_inventory WHERE id=?", (self.selected_armor_id,)
-            ) as cur:
-                ar = await cur.fetchone()
         pet_name = self.selected_pet.get("nickname") or PET_NAMES[self.selected_pet["element"]][self.selected_pet["variant"]][self.selected_pet["stage"]]
         r_emoji = RARITY_EMOJIS.get(ar[1], "")
         await interaction.response.edit_message(
             embed=discord.Embed(
-                description=f"✅ **{pet_name}** is now wearing {r_emoji} **{ar[0]}**!",
+                description=f"✅ **{pet_name}** equipped {r_emoji} **{ar[0]}** ({piece_type} slot)!",
                 color=0x2ECC71
             ),
             view=None
@@ -196,11 +207,8 @@ class Armor(commands.Cog):
                 return
             ar = dict(zip(cols, row))
 
-            # Unequip from any pet first
-            await conn.execute(
-                "UPDATE pets SET equipped_armor=NULL WHERE equipped_armor=? AND player_id=?",
-                (armor_id, interaction.user.id)
-            )
+            # Unequip from any pet slot first
+            await db.unequip_armor_id(conn, armor_id, interaction.user.id)
             await conn.execute("DELETE FROM armor_inventory WHERE id=?", (armor_id,))
             price = armor_sell_price(ar["rarity"])
             await conn.execute(
@@ -414,11 +422,7 @@ class UpgradeArmorView(discord.ui.View):
 
             # Delete fodder pieces
             for fid in self.fodder_ids:
-                # Unequip from any pet first
-                await conn.execute(
-                    "UPDATE pets SET equipped_armor=NULL WHERE equipped_armor=? AND player_id=?",
-                    (fid, self.user_id)
-                )
+                await db.unequip_armor_id(conn, fid, self.user_id)
                 await conn.execute(
                     "DELETE FROM armor_inventory WHERE id=? AND player_id=?",
                     (fid, self.user_id)
