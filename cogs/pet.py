@@ -7,7 +7,7 @@ import database as db
 from config import (
     ELEMENT_DISPLAY, ELEMENT_COLORS, ELEMENT_EMOJIS, PET_NAMES, STAGE_NAMES,
     FOOD_ITEMS, TRAIN_XP, TRAIN_STAT_BOOST, TRAIN_COOLDOWN_HOURS,
-    get_pet_image, get_food_image, xp_for_next_level
+    get_pet_image, get_food_image, xp_for_next_level, stat_cap
 )
 from game.stats import effective_stats, hp_bar, apply_stat_bonus, calc_base_stats
 from game.evolution import evolve_pet
@@ -39,13 +39,14 @@ def pet_embed(pet: dict, owner: discord.User | discord.Member = None) -> tuple[d
         embed.set_author(name=str(owner), icon_url=owner.display_avatar.url)
 
     if stage > 0:
+        caps = {s: stat_cap(pet[f"base_{s}"], level) for s in ("hp", "atk", "def", "spd", "mgk", "res")}
         embed.add_field(
-            name="⚔️ Battle Stats",
+            name="⚔️ Battle Stats  *(current / cap)*",
             value=(
                 f"```\n"
-                f"HP : {stats['hp']:>4}   ATK: {stats['atk']:>4}\n"
-                f"DEF: {stats['def']:>4}   SPD: {stats['spd']:>4}\n"
-                f"MGK: {stats['mgk']:>4}   RES: {stats['res']:>4}\n"
+                f"HP : {stats['hp']:>4}/{caps['hp']:<4}  ATK: {stats['atk']:>4}/{caps['atk']:<4}\n"
+                f"DEF: {stats['def']:>4}/{caps['def']:<4}  SPD: {stats['spd']:>4}/{caps['spd']:<4}\n"
+                f"MGK: {stats['mgk']:>4}/{caps['mgk']:<4}  RES: {stats['res']:>4}/{caps['res']:<4}\n"
                 f"```"
             ),
             inline=False
@@ -129,8 +130,15 @@ async def do_feed(pet: dict, item_key: str, user_id: int, channel) -> tuple[disc
     stage = pet["stage"]
     name = pet.get("nickname") or PET_NAMES[element][variant][stage]
     color = ELEMENT_COLORS[element]
-    stat_line = f"+{actual_boost} {stat_display}" if actual_boost > 0 else f"{stat_display} is at cap!"
-    cap_note = " *(stat capped)*" if was_capped and actual_boost == 0 else ""
+
+    # Compute new stat value and cap for display
+    current_stat = pet[f"base_{stat_key}"] + pet[f"bonus_{stat_key}"]
+    cap_val = stat_cap(pet[f"base_{stat_key}"], pet["level"])
+    if actual_boost > 0:
+        stat_line = f"+{actual_boost} {stat_display}  →  **{current_stat}/{cap_val}**"
+    else:
+        stat_line = f"⛔ {stat_display} at cap!  **{current_stat}/{cap_val}**"
+    partial_note = f" *(only +{actual_boost} applied, cap reached)*" if was_capped and actual_boost > 0 else ""
 
     embed = discord.Embed(color=color)
     file = None
@@ -167,13 +175,13 @@ async def do_feed(pet: dict, item_key: str, user_id: int, channel) -> tuple[disc
         except FileNotFoundError:
             pass
 
-    embed.add_field(name="Stat Boost", value=f"{stat_line}{cap_note}", inline=True)
+    embed.add_field(name="Stat Boost", value=f"{stat_line}{partial_note}", inline=False)
     embed.add_field(name="XP Gained", value=f"+{xp_gain} XP", inline=True)
     if pet["stage"] > 0:
         embed.add_field(
             name="Level",
             value=f"Level {pet['level']} | {pet['xp']}/{xp_for_next_level(pet['level'])} XP",
-            inline=False
+            inline=True
         )
     return embed, file, stat_key, actual_boost, xp_gain
 
@@ -248,20 +256,25 @@ class FeedView(discord.ui.View):
 
         # For bulk feeds, update the embed to show TOTAL stats/XP
         if qty > 1 and last_embed:
-            # Replace the stat/XP fields with totals
             last_embed.clear_fields()
             stat_display = total_stat_key.upper() if total_stat_key else "STAT"
-            last_embed.add_field(
-                name="Total Stat Boost",
-                value=f"+{total_stat_boost} {stat_display}" if total_stat_boost > 0 else f"{stat_display} is at cap!",
-                inline=True
-            )
+            if self.selected_pet and total_stat_key:
+                final_val = self.selected_pet[f"base_{total_stat_key}"] + self.selected_pet[f"bonus_{total_stat_key}"]
+                cap_val = stat_cap(self.selected_pet[f"base_{total_stat_key}"], self.selected_pet["level"])
+                stat_val_str = f"  →  **{final_val}/{cap_val}**"
+            else:
+                stat_val_str = ""
+            if total_stat_boost > 0:
+                boost_text = f"+{total_stat_boost} {stat_display}{stat_val_str}"
+            else:
+                boost_text = f"⛔ {stat_display} was already at cap!{stat_val_str}"
+            last_embed.add_field(name="Total Stat Boost", value=boost_text, inline=False)
             last_embed.add_field(name="Total XP Gained", value=f"+{total_xp} XP", inline=True)
             if self.selected_pet and self.selected_pet["stage"] > 0:
                 last_embed.add_field(
                     name="Level",
                     value=f"Level {self.selected_pet['level']} | {self.selected_pet['xp']}/{xp_for_next_level(self.selected_pet['level'])} XP",
-                    inline=False
+                    inline=True
                 )
             last_embed.set_footer(text=f"Fed ×{qty}")
 

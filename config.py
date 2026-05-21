@@ -111,9 +111,9 @@ def xp_for_next_level(level: int) -> int:
     else:
         return 1800
 
-# Stat cap: base_stat + (level * 2)  — bonus stats cannot push past this
+# Stat cap: base_stat + (level * 10)  — bonus stats cannot push past this
 def stat_cap(base_stat: int, level: int) -> int:
-    return base_stat + (level * 2)
+    return base_stat + (level * 10)
 
 # Evolution requirements
 EVO_REQUIREMENTS = {
