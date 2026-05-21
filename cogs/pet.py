@@ -510,20 +510,25 @@ class Pet(commands.Cog):
             )
         elif stage > 0:
             embed.add_field(name="📈 XP", value="**MAX LEVEL** ⭐", inline=False)
-        expl = pet['exploration']
-        expl_note = " ✅ Mega unlocked!" if expl >= 100 else f" ({100 - expl} to Mega)"
-        embed.add_field(name="🧭 Exploration", value=f"{expl}/100{expl_note}", inline=True)
+        # Stat caps — all 6 stats, current / cap
+        def fmt(s):
+            cur = pet[f"base_{s}"] + pet[f"bonus_{s}"]
+            cap = stat_cap(pet[f"base_{s}"], level)
+            bar = "🟩" if cur < cap else "🟥"
+            return f"{bar} **{s.upper()}** {cur}/{cap}"
 
-        cap_hp = stat_cap(pet["base_hp"], level)
         embed.add_field(
-            name=f"📊 Stat Caps (at level {level})",
+            name=f"📊 Stat Caps  *(level {level})*",
             value=(
-                f"HP cap: **{cap_hp}** | Room: +{cap_hp - (pet['base_hp'] + pet['bonus_hp'])}\n"
-                f"ATK cap: **{stat_cap(pet['base_atk'], level)}** | "
-                f"MGK cap: **{stat_cap(pet['base_mgk'], level)}**"
+                f"{fmt('hp')}   {fmt('spd')}\n"
+                f"{fmt('atk')}   {fmt('mgk')}\n"
+                f"{fmt('def')}   {fmt('res')}\n"
+                f"*🟩 = room to grow · 🟥 = capped*"
             ),
             inline=False
         )
+
+        # Exploration
         expl_val = pet['exploration']
         if expl_val >= 100:
             expl_desc = f"**{expl_val}/100** ✅\n*Mega Stone drops **unlocked**! You can now find them on expeditions.*"
