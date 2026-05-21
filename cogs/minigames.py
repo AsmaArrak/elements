@@ -6,7 +6,7 @@ import random
 from datetime import datetime, timezone, timedelta
 
 import database as db
-from config import FOOD_ITEMS, STAT_ITEMS, ACCELERATORS, FISH_COOLDOWN_MINUTES, DIG_COOLDOWN_MINUTES, TRIVIA_COOLDOWN_MINUTES
+from config import FOOD_ITEMS, STAT_ITEMS, ACCELERATORS, FISH_COOLDOWN_MINUTES, DIG_COOLDOWN_MINUTES, TRIVIA_COOLDOWN_MINUTES, PLAYER_XP_SOURCES
 
 
 TRIVIA_QUESTIONS = [
@@ -295,6 +295,8 @@ class Minigames(commands.Cog):
                     (db.now_iso(), interaction.user.id)
                 )
 
+            fish_xp = PLAYER_XP_SOURCES.get("fish", 5)
+            _, _, fish_leveled = await db.add_player_xp(conn, interaction.user.id, fish_xp)
             await conn.commit()
 
         embed = discord.Embed(
@@ -302,7 +304,8 @@ class Minigames(commands.Cog):
             description=result_text,
             color=0x3498DB
         )
-        embed.set_footer(text=f"Fishing resets every {FISH_COOLDOWN_MINUTES} minutes.")
+        level_up_note = " ⬆️ **LEVEL UP!**" if fish_leveled else ""
+        embed.set_footer(text=f"+{fish_xp} player XP{level_up_note} · Fishing resets every {FISH_COOLDOWN_MINUTES} minutes.")
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="dig", description="Excavate a spot for buried treasure")
@@ -397,6 +400,8 @@ class Minigames(commands.Cog):
                     (db.now_iso(), interaction.user.id)
                 )
 
+            dig_xp = PLAYER_XP_SOURCES.get("dig", 5)
+            _, _, dig_leveled = await db.add_player_xp(conn, interaction.user.id, dig_xp)
             await conn.commit()
 
         embed = discord.Embed(
@@ -404,7 +409,8 @@ class Minigames(commands.Cog):
             description=result_text,
             color=0x8B4513
         )
-        embed.set_footer(text=f"Digging resets every {DIG_COOLDOWN_MINUTES} minutes.")
+        level_up_note = " ⬆️ **LEVEL UP!**" if dig_leveled else ""
+        embed.set_footer(text=f"+{dig_xp} player XP{level_up_note} · Digging resets every {DIG_COOLDOWN_MINUTES} minutes.")
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="trivia", description="Answer a trivia question to win coins")

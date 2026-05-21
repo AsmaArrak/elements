@@ -288,6 +288,8 @@ PLAYER_XP_SOURCES = {
     "battle_win":     15,
     "battle_loss":     5,
     "dungeon":        30,
+    "fish":            5,
+    "dig":             5,
 }
 
 # ── Dungeons ───────────────────────────────────────────────────────────────────
