@@ -66,6 +66,14 @@ class Dungeon(commands.Cog):
                      piece.get("bonus_mgk", 0), piece.get("bonus_res", 0))
                 )
 
+            # Coin reward
+            import random
+            coins_gained = random.randint(500, 1000)
+            await conn.execute(
+                "UPDATE players SET coins=coins+? WHERE user_id=?",
+                (coins_gained, interaction.user.id)
+            )
+
             # Player XP
             p_xp = PLAYER_XP_SOURCES.get("dungeon", 30)
             new_level, new_xp, leveled_up = await db.add_player_xp(conn, interaction.user.id, p_xp)
@@ -95,6 +103,7 @@ class Dungeon(commands.Cog):
             lines.append(f"{r_emoji} {elem_emoji} **{piece['name']}** — {stat_str}")
 
         embed.add_field(name="🎁 Armor Dropped", value="\n".join(lines), inline=False)
+        embed.add_field(name="💰 Coins", value=f"+**{coins_gained:,}**", inline=True)
         embed.add_field(
             name="🌙 Moon Shards",
             value=f"{shards_left}/{MOON_SHARD_CAP} *(+1 every {MOON_SHARD_REGEN_MINS} min)*",

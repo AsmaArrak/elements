@@ -383,38 +383,49 @@ class Pet(commands.Cog):
                 msg = "You haven't started yet! Use `/start` to begin." if is_self else f"**{target.display_name}** hasn't started yet."
                 await interaction.response.send_message(msg, ephemeral=True)
                 return
-            pet = await db.get_active_pet(conn, target.id)
-            if not pet:
-                msg = "You have no active pet." if is_self else f"**{target.display_name}** has no active pet."
-                await interaction.response.send_message(msg, ephemeral=True)
-                return
-            all_pets = await db.get_player_pets(conn, target.id)
-            # Sync moon shards so the count is up to date
             moon_shards = await db.sync_moon_shards(conn, target.id)
-            p = await db.get_player(conn, target.id)  # re-fetch after sync
+            p = await db.get_player(conn, target.id)
+            all_pets = await db.get_player_pets(conn, target.id)
 
+        from config import player_xp_for_next_level, PLAYER_LEVEL_CAP, MOON_SHARD_CAP
         player_level = p.get("player_level") or 1
-        from config import player_xp_for_next_level, PLAYER_LEVEL_CAP
         p_xp = p.get("player_xp") or 0
-        p_xp_needed = player_xp_for_next_level(player_level) if player_level < PLAYER_LEVEL_CAP else 0
 
-        embed, file = pet_embed(pet, target)
-
-        # Player-level info field
-        if player_level >= PLAYER_LEVEL_CAP:
-            p_level_val = f"**Level {player_level}** (MAX ⭐)"
-        else:
-            p_bar = hp_bar(p_xp, p_xp_needed, 10)
-            p_level_val = f"**Level {player_level}** · `{p_bar}` {p_xp}/{p_xp_needed} XP"
-        embed.add_field(
-            name="👤 Player",
-            value=f"{p_level_val}\n🌙 **{moon_shards}** Moon Shards · 💰 **{p['coins']}** coins",
-            inline=False
+        embed = discord.Embed(
+            title=f"👤 {target.display_name}",
+            color=0x7B68EE
         )
-        embed.set_footer(text=f"Team: {len(all_pets)} pet(s)")
+        embed.set_thumbnail(url=target.display_avatar.url)
 
-        # Own profile is private; viewing someone else's is public
-        await interaction.response.send_message(embed=embed, file=file, ephemeral=is_self)
+        # Player level + XP
+        if player_level >= PLAYER_LEVEL_CAP:
+            xp_line = f"**Level {player_level} / {PLAYER_LEVEL_CAP}** ⭐ MAX"
+        else:
+            p_xp_needed = player_xp_for_next_level(player_level)
+            p_bar = hp_bar(p_xp, p_xp_needed, 12)
+            xp_line = f"**Level {player_level} / {PLAYER_LEVEL_CAP}**\n`{p_bar}` {p_xp:,} / {p_xp_needed:,} XP"
+        embed.add_field(name="🏅 Player Level", value=xp_line, inline=False)
+
+        # Resources
+        embed.add_field(name="💰 Coins", value=f"**{p['coins']:,}**", inline=True)
+        embed.add_field(name="🌙 Moon Shards", value=f"**{moon_shards} / {MOON_SHARD_CAP}**", inline=True)
+
+        # Pet roster
+        if all_pets:
+            lines = []
+            for pet in all_pets[:10]:
+                stage_name = STAGE_NAMES[pet["stage"]]
+                elem_emoji = ELEMENT_EMOJIS[pet["element"]]
+                name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
+                lines.append(f"{elem_emoji} **{name}** · {stage_name} · Lv {pet['level']}")
+            if len(all_pets) > 10:
+                lines.append(f"*...and {len(all_pets) - 10} more*")
+            embed.add_field(name=f"🐾 Pets ({len(all_pets)})", value="\n".join(lines), inline=False)
+        else:
+            embed.add_field(name="🐾 Pets", value="*No pets yet — use `/start`*", inline=False)
+
+        embed.set_footer(text="Use /pet to see full stats for a specific pet")
+        await interaction.response.send_message(embed=embed, ephemeral=is_self)
 
     @app_commands.command(name="pet", description="Detailed view of your active pet's stats and bonuses")
     async def pet_cmd(self, interaction: discord.Interaction):
