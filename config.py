@@ -104,9 +104,9 @@ STAGE_MULTIPLIERS = {0: 0.5, 1: 1.0, 2: 1.6, 3: 2.5, 4: 4.0}
 def xp_for_next_level(level: int) -> int:
     if level < 10:
         return 100
-    elif level < 35:
+    elif level < 20:
         return 350
-    elif level < 70:
+    elif level < 50:
         return 800
     else:
         return 1800
@@ -119,8 +119,8 @@ def stat_cap(base_stat: int, level: int) -> int:
 EVO_REQUIREMENTS = {
     # stage -> (min_level, required_item_type or None)
     1: (1, None),              # Egg -> Evo1: just first feeding
-    2: (35, "evo_stone_uncommon"),
-    3: (70, "evo_stone_rare"),
+    2: (20, "evo_stone_uncommon"),
+    3: (50, "evo_stone_rare"),
     4: (100, "mega_stone"),    # also needs exploration >= 100
 }
 

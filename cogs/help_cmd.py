@@ -138,8 +138,8 @@ class Help(commands.Cog):
             name="🌱 Evolution Path",
             value=(
                 "🥚 Egg → Feed **3 times** → Evo 1\n"
-                "Evo 1 → Level 35 + Uncommon Evo Stone → Evo 2\n"
-                "Evo 2 → Level 70 + Rare Evo Stone → Evo 3\n"
+                "Evo 1 → Level 20 + Uncommon Evo Stone → Evo 2\n"
+                "Evo 2 → Level 50 + Rare Evo Stone → Evo 3\n"
                 "Evo 3 → Level 100 + Exploration 100/100 + Mega Stone → **MEGA** ⭐"
             ),
             inline=False
