@@ -454,6 +454,16 @@ class UpgradeArmorView(discord.ui.View):
                 return
 
             if new_level == current_level:
+                # Check if XP is enough but coins blocked the level-up
+                xp_needed_now = xp_to_next_armor_level(new_level)
+                if xp_needed_now is not None and armor_xp >= xp_needed_now:
+                    coin_cost_needed = ARMOR_UPGRADE_COINS.get(new_level, 500)
+                    await interaction.response.send_message(
+                        f"❌ You have enough XP to level up but need **{coin_cost_needed:,} coins** to do it! "
+                        f"You only have **{player_coins:,} coins**.",
+                        ephemeral=True
+                    )
+                    return
                 # No level up — just store the XP progress
                 await conn.execute(
                     "UPDATE armor_inventory SET armor_xp=? WHERE id=?",
