@@ -673,15 +673,16 @@ class Economy(commands.Cog):
                 desc = f"You rolled {dice_faces[roll]} — not good enough.\nYou lose **{bet:,} coins**."
             elif roll <= 5:
                 # Win 2× bet
+                winnings = bet * 2
                 await conn.execute(
-                    "UPDATE players SET coins=coins+? WHERE user_id=?", (bet, interaction.user.id)
+                    "UPDATE players SET coins=coins+? WHERE user_id=?", (winnings, interaction.user.id)
                 )
                 await conn.commit()
                 color, title = 0x2ECC71, "✅ Nice Roll!"
-                desc = f"You rolled {dice_faces[roll]} — solid!\nYou win **{bet:,} coins**!"
+                desc = f"You rolled {dice_faces[roll]} — solid!\nYou win **{winnings:,} coins** (2×)!"
             else:
                 # Roll 6 — win 3× bet
-                winnings = bet * 2
+                winnings = bet * 3
                 await conn.execute(
                     "UPDATE players SET coins=coins+? WHERE user_id=?", (winnings, interaction.user.id)
                 )
