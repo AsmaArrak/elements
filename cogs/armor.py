@@ -485,10 +485,17 @@ class UpgradeArmorView(discord.ui.View):
             title="🔨 Armor Upgraded!",
             color=0xF39C12
         )
+        if new_level > current_level:
+            piece_value = f"Level **{current_level}** → **{new_level}**"
+        else:
+            xp_needed = xp_to_next_armor_level(new_level) or 0
+            piece_value = (
+                f"Level **{current_level}** — XP stored (+{total_xp} XP)\n"
+                f"Progress: **{armor_xp}/{xp_needed} XP** to level {current_level + 1}"
+            )
         embed.add_field(
             name=f"{r_emoji} {target['name']}",
-            value=f"Level **{current_level}** → **{new_level}**" if new_level > current_level
-                  else f"Level **{current_level}** — XP stored (+{total_xp} XP toward next level)",
+            value=piece_value,
             inline=False
         )
         if new_substats_gained:
