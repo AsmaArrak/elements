@@ -33,6 +33,102 @@ def item_display_name(item_key: str, item_type: str, element: str = None) -> str
     return item_key.replace("_", " ").title()
 
 
+class IncubateView(discord.ui.View):
+    """Dropdown to pick which egg to incubate."""
+
+    def __init__(self, user_id: int, options: list[discord.SelectOption]):
+        super().__init__(timeout=60)
+        self.user_id = user_id
+
+        sel = discord.ui.Select(
+            placeholder="🥚 Choose an egg to incubate...",
+            options=options,
+            row=0
+        )
+        sel.callback = self._on_select
+        self.add_item(sel)
+
+    async def _on_select(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This isn't your menu!", ephemeral=True)
+            return
+
+        element = interaction.data["values"][0]
+        self.stop()
+
+        import random
+        import os
+        from config import ELEMENTS, PET_NAMES, ASSETS_PATH
+        from game.stats import calc_base_stats
+
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            # Re-check they still have the egg
+            if not await db.has_item(conn, interaction.user.id, "egg", element=element):
+                await interaction.response.edit_message(
+                    content=f"❌ You no longer have a **{ELEMENT_DISPLAY.get(element, element.title())} Egg**!",
+                    embed=None, view=None
+                )
+                return
+
+            # Remove from inventory
+            await db.remove_item(conn, interaction.user.id, "egg", element=element)
+
+            # Variant with pity (alternates between 1 and 2)
+            async with conn.execute(
+                "SELECT last_variant FROM element_pity WHERE player_id=? AND element=?",
+                (interaction.user.id, element)
+            ) as cur:
+                pity_row = await cur.fetchone()
+            last_variant = pity_row[0] if pity_row else None
+            if last_variant == 1:
+                variant = 2
+            elif last_variant == 2:
+                variant = 1
+            else:
+                variant = random.choice([1, 2])
+            await conn.execute(
+                """INSERT INTO element_pity(player_id, element, last_variant)
+                   VALUES(?,?,?) ON CONFLICT(player_id, element) DO UPDATE SET last_variant=?""",
+                (interaction.user.id, element, variant, variant)
+            )
+
+            # Create egg pet (stage 0)
+            base = calc_base_stats(element, 0)
+            await conn.execute(
+                """INSERT INTO pets (player_id, element, variant, stage, level, xp,
+                   base_hp, base_atk, base_def, base_spd, base_mgk, base_res)
+                   VALUES (?,?,?,0,1,0,?,?,?,?,?,?)""",
+                (interaction.user.id, element, variant,
+                 base["hp"], base["atk"], base["def"],
+                 base["spd"], base["mgk"], base["res"])
+            )
+            await conn.commit()
+
+        egg_name = PET_NAMES[element][variant][0]
+        emoji = ELEMENT_EMOJIS[element]
+        color = ELEMENT_COLORS[element]
+        display = ELEMENT_DISPLAY.get(element, element.title())
+
+        embed = discord.Embed(
+            title=f"🥚 {egg_name} is now in your care!",
+            description=(
+                f"{emoji} Your **{display} Egg** has been placed!\n\n"
+                f"Feed it **3 times** with `/feed` to hatch it!"
+            ),
+            color=color
+        )
+        try:
+            img_path = os.path.join(ASSETS_PATH, element, "egg.png")
+            if os.path.exists(img_path):
+                file = discord.File(img_path, filename="egg.png")
+                embed.set_thumbnail(url="attachment://egg.png")
+                await interaction.response.edit_message(embed=embed, view=None, attachments=[file])
+                return
+        except Exception:
+            pass
+        await interaction.response.edit_message(embed=embed, view=None)
+
+
 class Inventory(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -299,90 +395,46 @@ class Inventory(commands.Cog):
             )
 
     @app_commands.command(name="incubate", description="Place an egg from your inventory to hatch it")
-    @app_commands.describe(element="Element of the egg to incubate (e.g. ember, tide, void)")
-    async def incubate(self, interaction: discord.Interaction, element: str):
-        element = element.lower().strip()
-        from config import ELEMENTS, PET_NAMES, get_pet_image
-        if element not in ELEMENTS:
-            await interaction.response.send_message(
-                f"Unknown element `{element}`. Valid: {', '.join(ELEMENTS)}", ephemeral=True
-            )
-            return
-
+    async def incubate(self, interaction: discord.Interaction):
         async with aiosqlite.connect(db.DB_PATH) as conn:
             player = await db.get_player(conn, interaction.user.id)
             if not player:
                 await interaction.response.send_message("Use `/start` first.", ephemeral=True)
                 return
 
-            # Check they have that egg in inventory
-            if not await db.has_item(conn, interaction.user.id, "egg", element=element):
-                await interaction.response.send_message(
-                    f"You don't have a **{ELEMENT_DISPLAY.get(element, element.title())} Egg** 🥚 in your inventory!",
-                    ephemeral=True
-                )
-                return
-
-            # Remove from inventory
-            await db.remove_item(conn, interaction.user.id, "egg", element=element)
-
-            # Pick a random variant (1 or 2) with pity system
-            import random
+            # Fetch all eggs in inventory
             async with conn.execute(
-                "SELECT last_variant FROM element_pity WHERE player_id=? AND element=?",
-                (interaction.user.id, element)
+                "SELECT element, quantity FROM inventory WHERE player_id=? AND item_key='egg' AND quantity>0",
+                (interaction.user.id,)
             ) as cur:
-                pity_row = await cur.fetchone()
-            last_variant = pity_row[0] if pity_row else None
-            if last_variant == 1:
-                variant = 2
-            elif last_variant == 2:
-                variant = 1
-            else:
-                variant = random.choice([1, 2])
-            await conn.execute(
-                """INSERT INTO element_pity(player_id, element, last_variant)
-                   VALUES(?,?,?) ON CONFLICT(player_id, element) DO UPDATE SET last_variant=?""",
-                (interaction.user.id, element, variant, variant)
+                egg_rows = await cur.fetchall()
+
+        if not egg_rows:
+            await interaction.response.send_message(
+                "🥚 You have no eggs in your inventory!\nFind eggs from expeditions, channel drops, or the `/start` command.",
+                ephemeral=True
             )
+            return
 
-            # Create the pet (stage 0 = egg)
-            from game.stats import calc_base_stats
-            base = calc_base_stats(element, 0)
-            await conn.execute(
-                """INSERT INTO pets (player_id, element, variant, stage, level, xp,
-                   base_hp, base_atk, base_def, base_spd, base_mgk, base_res)
-                   VALUES (?,?,?,0,1,0,?,?,?,?,?,?)""",
-                (interaction.user.id, element, variant,
-                 base["hp"], base["atk"], base["def"],
-                 base["spd"], base["mgk"], base["res"])
-            )
-            await conn.commit()
+        # Build dropdown options from owned eggs
+        options = []
+        for element, qty in egg_rows:
+            emoji = ELEMENT_EMOJIS.get(element, "🥚")
+            display = ELEMENT_DISPLAY.get(element, element.title())
+            options.append(discord.SelectOption(
+                label=f"{display} Egg",
+                value=element,
+                description=f"You have {qty}× · Feed 3 times to hatch",
+                emoji=emoji
+            ))
 
-        egg_name = PET_NAMES[element][variant][0]
-        emoji = ELEMENT_EMOJIS[element]
-        color = ELEMENT_COLORS[element]
-
+        view = IncubateView(interaction.user.id, options)
         embed = discord.Embed(
-            title=f"🥚 {egg_name} is now in your care!",
-            description=(
-                f"{emoji} Your **{ELEMENT_DISPLAY.get(element, element.title())} Egg** has been placed!\n\n"
-                f"Feed it **3 times** with `/feed` to hatch it!"
-            ),
-            color=color
+            title="🥚 Incubate an Egg",
+            description="Choose which egg to place. Feed it **3 times** with `/feed` to hatch it!",
+            color=0xF1C40F
         )
-        try:
-            import os
-            from config import get_pet_image, ASSETS_PATH
-            img_path = os.path.join(ASSETS_PATH, element, "egg.png")
-            if os.path.exists(img_path):
-                file = discord.File(img_path, filename="egg.png")
-                embed.set_thumbnail(url="attachment://egg.png")
-                await interaction.response.send_message(embed=embed, file=file)
-                return
-        except Exception:
-            pass
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
