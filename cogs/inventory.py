@@ -33,6 +33,177 @@ def item_display_name(item_key: str, item_type: str, element: str = None) -> str
     return item_key.replace("_", " ").title()
 
 
+class UseView(discord.ui.View):
+    """Dropdown to pick a stat item or evo stone to use on your active pet."""
+
+    def __init__(self, user_id: int, options: list[discord.SelectOption]):
+        super().__init__(timeout=60)
+        self.user_id = user_id
+
+        sel = discord.ui.Select(
+            placeholder="🎒 Choose an item to use...",
+            options=options,
+            row=0
+        )
+        sel.callback = self._on_select
+        self.add_item(sel)
+
+    async def _on_select(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This isn't your menu!", ephemeral=True)
+            return
+
+        self.stop()
+        # Value format: "item_key|element"  (element is empty string for stat items)
+        raw = interaction.data["values"][0]
+        item_key, element = raw.split("|", 1)
+        element = element or None
+
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            player = await db.get_player(conn, interaction.user.id)
+            if not player:
+                await interaction.response.edit_message(content="❌ Account not found.", embed=None, view=None)
+                return
+            pet = await db.get_active_pet(conn, interaction.user.id)
+            if not pet:
+                await interaction.response.edit_message(content="❌ No active pet.", embed=None, view=None)
+                return
+
+            exp = await db.get_active_expedition(conn, interaction.user.id)
+            if exp and exp["pet_id"] == pet["id"]:
+                await interaction.response.edit_message(
+                    content="❌ Your pet is on an expedition!", embed=None, view=None
+                )
+                return
+
+            # ── Stat item ──────────────────────────────────────────────────────
+            if item_key in STAT_ITEMS:
+                if not await db.has_item(conn, interaction.user.id, item_key):
+                    await interaction.response.edit_message(
+                        content=f"❌ You no longer have **{STAT_ITEMS[item_key]['display']}**.",
+                        embed=None, view=None
+                    )
+                    return
+                from game.stats import apply_stat_bonus
+                from config import stat_cap
+                stat_key = STAT_ITEMS[item_key]["stat"]
+                boost = STAT_ITEMS[item_key]["boost"]
+                actual, capped = apply_stat_bonus(pet, stat_key, boost)
+                if actual > 0:
+                    await conn.execute(
+                        f"UPDATE pets SET bonus_{stat_key}=bonus_{stat_key}+? WHERE id=?",
+                        (actual, pet["id"])
+                    )
+                await db.remove_item(conn, interaction.user.id, item_key)
+                await conn.commit()
+
+                name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
+                new_bonus = pet[f"bonus_{stat_key}"] + actual
+                new_total = pet[f"base_{stat_key}"] + new_bonus
+                cap_val = stat_cap(pet[f"base_{stat_key}"], pet["level"])
+
+                if actual == 0:
+                    result_line = f"⛔ {stat_key.upper()} is already at cap! **{new_total}/{cap_val}**"
+                elif capped:
+                    result_line = f"+{actual} {stat_key.upper()} *(cap reached)* → **{new_total}/{cap_val}**"
+                else:
+                    result_line = f"+{actual} {stat_key.upper()} → **{new_total}/{cap_val}**"
+
+                embed = discord.Embed(
+                    description=f"✅ Used **{STAT_ITEMS[item_key]['display']}** on **{name}**!\n{result_line}",
+                    color=0x2ECC71
+                )
+                await interaction.response.edit_message(embed=embed, view=None)
+                return
+
+            # ── Evo / Mega stone ───────────────────────────────────────────────
+            evo_stones = {"evo_stone_uncommon": 2, "evo_stone_rare": 3, "mega_stone": 4}
+            if item_key in evo_stones:
+                from game.evolution import evolve_pet, can_evolve_to
+                from config import get_pet_image
+                target_stage = evo_stones[item_key]
+                req_element = pet["element"]
+
+                if element and element != req_element:
+                    await interaction.response.edit_message(
+                        content=(
+                            f"❌ That stone is for **{ELEMENT_DISPLAY.get(element, element)}** pets, "
+                            f"but your pet is **{ELEMENT_DISPLAY[req_element]}**."
+                        ),
+                        embed=None, view=None
+                    )
+                    return
+
+                has_it = await db.has_item(conn, interaction.user.id, item_key, element=req_element)
+                ok, reason = can_evolve_to(pet, target_stage, has_it, item_key)
+                if not ok:
+                    await interaction.response.edit_message(content=f"❌ {reason}", embed=None, view=None)
+                    return
+
+                await db.remove_item(conn, interaction.user.id, item_key, element=req_element)
+                await evolve_pet(conn, pet, target_stage)
+                await conn.commit()
+                pet = await db.get_pet(conn, pet["id"])
+
+                name = PET_NAMES[pet["element"]][pet["variant"]][target_stage]
+                stage_name = ["Egg", "Evo 1", "Evo 2", "Evo 3", "MEGA EVOLUTION"][target_stage]
+                emoji = ELEMENT_EMOJIS[pet["element"]]
+                color = ELEMENT_COLORS[pet["element"]]
+
+                image_path = get_pet_image(pet["element"], pet["variant"], target_stage)
+                pet_file = discord.File(image_path, filename="evo.png")
+                stone_file = None
+                try:
+                    stone_path = get_stone_image(pet["element"], item_key)
+                    stone_file = discord.File(stone_path, filename="stone.png")
+                except Exception:
+                    pass
+
+                evo_embed = discord.Embed(
+                    title=f"{'⭐ MEGA ' if target_stage == 4 else '✨ '}EVOLUTION!",
+                    description=(
+                        f"{emoji} **{name}** has reached **{stage_name}**!\n\n"
+                        "All stats have been boosted significantly."
+                    ),
+                    color=color
+                )
+                evo_embed.set_image(url="attachment://evo.png")
+                if stone_file:
+                    evo_embed.set_thumbnail(url="attachment://stone.png")
+
+                # Dismiss the dropdown first, then send evo result as followup
+                await interaction.response.edit_message(
+                    content="✨ Evolution in progress...", embed=None, view=None
+                )
+                files = [pet_file] + ([stone_file] if stone_file else [])
+                await interaction.followup.send(embed=evo_embed, files=files)
+
+                # Mega announcement
+                if target_stage == 4 and interaction.guild:
+                    async with aiosqlite.connect(db.DB_PATH) as cfg_conn:
+                        cfg = await db.get_guild_config(cfg_conn, interaction.guild.id)
+                    ch_id = cfg.get("announce_channel_id") if cfg else None
+                    ch = interaction.guild.get_channel(ch_id) if ch_id else interaction.channel
+                    if ch:
+                        try:
+                            ann_file = discord.File(image_path, filename="mega.png")
+                            ann_embed = discord.Embed(
+                                title="⚡ LEGENDARY EVOLUTION ⚡",
+                                description=(
+                                    f"{interaction.user.mention}'s **{name}** has achieved "
+                                    f"**MEGA EVOLUTION**!\n{emoji} The server trembles..."
+                                ),
+                                color=color
+                            )
+                            ann_embed.set_image(url="attachment://mega.png")
+                            await ch.send(embed=ann_embed, file=ann_file)
+                        except Exception:
+                            await ch.send(
+                                f"⚡ **MEGA EVOLUTION!** ⚡\n"
+                                f"{interaction.user.mention}'s **{name}** {emoji} has gone Mega!"
+                            )
+
+
 class IncubateView(discord.ui.View):
     """Dropdown to pick which egg to incubate."""
 
@@ -218,181 +389,65 @@ class Inventory(commands.Cog):
         embed.set_footer(text=f"💰 {player['coins']} coins")
         await interaction.response.send_message(embed=embed)
 
-    async def use_autocomplete(self, interaction: discord.Interaction, current: str):
-        choices = []
-        # Stat items
-        for key, info in STAT_ITEMS.items():
-            label = f"{info['display']} — {info['desc']}"
-            if current.lower() in key.lower() or current.lower() in label.lower():
-                choices.append(app_commands.Choice(name=label[:100], value=key))
-        # Evo stones
-        for key, label in [
-            ("evo_stone_uncommon", "Uncommon Evo Stone — evolves Evo 1 → Evo 2"),
-            ("evo_stone_rare",     "Rare Evo Stone — evolves Evo 2 → Evo 3"),
-            ("mega_stone",         "Mega Stone ⭐ — evolves Evo 3 → Mega"),
-        ]:
-            if current.lower() in key.lower() or current.lower() in label.lower():
-                choices.append(app_commands.Choice(name=label[:100], value=key))
-        return choices[:25]
-
     @app_commands.command(name="use", description="Use a stat item or evolution stone on your active pet")
-    @app_commands.describe(
-        item="Pick a stat item or evo stone from the list",
-        element="Element of the stone (required for evo/mega stones)"
-    )
-    @app_commands.autocomplete(item=use_autocomplete)
-    async def use(self, interaction: discord.Interaction, item: str, element: str = None):
-        item = item.lower().strip()
-        if element:
-            element = element.lower().strip()
-
+    async def use(self, interaction: discord.Interaction):
         async with aiosqlite.connect(db.DB_PATH) as conn:
             player = await db.get_player(conn, interaction.user.id)
             if not player:
                 await interaction.response.send_message("Use `/start` first.", ephemeral=True)
                 return
-            pet = await db.get_active_pet(conn, interaction.user.id)
-            if not pet:
-                await interaction.response.send_message("No active pet.", ephemeral=True)
-                return
+            inventory = await db.get_inventory(conn, interaction.user.id)
 
-            exp = await db.get_active_expedition(conn, interaction.user.id)
-            if exp and exp["pet_id"] == pet["id"]:
-                await interaction.response.send_message(
-                    "Your pet is on an expedition!", ephemeral=True
-                )
-                return
+        # Filter to only usable item types
+        usable_types = {"stat_item", "evo_stone", "mega_stone"}
+        usable = [i for i in inventory if i["item_type"] in usable_types and i["quantity"] > 0]
 
-            # Stat items
-            if item in STAT_ITEMS:
-                if not await db.has_item(conn, interaction.user.id, item):
-                    await interaction.response.send_message(
-                        f"You don't have a **{STAT_ITEMS[item]['display']}**.", ephemeral=True
-                    )
-                    return
-                from game.stats import apply_stat_bonus
-                stat_key = STAT_ITEMS[item]["stat"]
-                boost = STAT_ITEMS[item]["boost"]
-                actual, capped = apply_stat_bonus(pet, stat_key, boost)
-                if actual > 0:
-                    await conn.execute(
-                        f"UPDATE pets SET bonus_{stat_key}=bonus_{stat_key}+? WHERE id=?",
-                        (actual, pet["id"])
-                    )
-                await db.remove_item(conn, interaction.user.id, item)
-                await conn.commit()
-
-                name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
-                from config import stat_cap
-                new_bonus = pet[f"bonus_{stat_key}"] + actual
-                new_total = pet[f"base_{stat_key}"] + new_bonus
-                cap_val = stat_cap(pet[f"base_{stat_key}"], pet["level"])
-                if actual == 0:
-                    result_line = f"⛔ {stat_key.upper()} is already at cap! **{new_total}/{cap_val}**"
-                elif capped:
-                    result_line = f"+{actual} {stat_key.upper()} *(cap reached)* → **{new_total}/{cap_val}**"
-                else:
-                    result_line = f"+{actual} {stat_key.upper()} → **{new_total}/{cap_val}**"
-                await interaction.response.send_message(
-                    f"✅ Used **{STAT_ITEMS[item]['display']}** on **{name}**!\n{result_line}"
-                )
-                return
-
-            # Evolution stones
-            evo_stones = {"evo_stone_uncommon": 2, "evo_stone_rare": 3, "mega_stone": 4}
-            if item in evo_stones:
-                target_stage = evo_stones[item]
-                req_element = pet["element"]
-
-                if not element:
-                    await interaction.response.send_message(
-                        f"Specify the element of your stone: `/use {item} element:{req_element}`",
-                        ephemeral=True
-                    )
-                    return
-
-                if element != req_element:
-                    await interaction.response.send_message(
-                        f"That stone is for **{ELEMENT_DISPLAY.get(element, element)}** pets, "
-                        f"but your pet is **{ELEMENT_DISPLAY[req_element]}**.",
-                        ephemeral=True
-                    )
-                    return
-
-                has_it = await db.has_item(conn, interaction.user.id, item, element=req_element)
-                ok, reason = can_evolve_to(pet, target_stage, has_it, item)
-                if not ok:
-                    await interaction.response.send_message(reason, ephemeral=True)
-                    return
-
-                await db.remove_item(conn, interaction.user.id, item, element=req_element)
-                await evolve_pet(conn, pet, target_stage)
-                await conn.commit()
-                pet = await db.get_pet(conn, pet["id"])
-
-                name = PET_NAMES[pet["element"]][pet["variant"]][target_stage]
-                stage_name = ["Egg", "Evo 1", "Evo 2", "Evo 3", "MEGA EVOLUTION"][target_stage]
-                emoji = ELEMENT_EMOJIS[pet["element"]]
-                color = ELEMENT_COLORS[pet["element"]]
-
-                from config import get_pet_image
-                image_path = get_pet_image(pet["element"], pet["variant"], target_stage)
-                pet_file = discord.File(image_path, filename="evo.png")
-
-                # Show the stone art as thumbnail
-                stone_file = None
-                try:
-                    stone_path = get_stone_image(pet["element"], item)
-                    stone_file = discord.File(stone_path, filename="stone.png")
-                except Exception:
-                    pass
-
-                embed = discord.Embed(
-                    title=f"{'⭐ MEGA ' if target_stage == 4 else '✨ '}EVOLUTION!",
-                    description=(
-                        f"{emoji} **{name}** has reached **{stage_name}**!\n\n"
-                        "All stats have been boosted significantly."
-                    ),
-                    color=color
-                )
-                embed.set_image(url="attachment://evo.png")
-                if stone_file:
-                    embed.set_thumbnail(url="attachment://stone.png")
-
-                files = [pet_file] + ([stone_file] if stone_file else [])
-                await interaction.response.send_message(embed=embed, files=files)
-
-                # Mega announcement
-                if target_stage == 4 and interaction.guild:
-                    async with aiosqlite.connect(db.DB_PATH) as cfg_conn:
-                        cfg = await db.get_guild_config(cfg_conn, interaction.guild.id)
-                    ch_id = cfg.get("announce_channel_id") if cfg else None
-                    ch = interaction.guild.get_channel(ch_id) if ch_id else interaction.channel
-                    if ch:
-                        try:
-                            ann_file = discord.File(image_path, filename="mega.png")
-                            ann_embed = discord.Embed(
-                                title="⚡ LEGENDARY EVOLUTION ⚡",
-                                description=(
-                                    f"{interaction.user.mention}'s **{name}** has achieved "
-                                    f"**MEGA EVOLUTION**!\n{emoji} The server trembles..."
-                                ),
-                                color=color
-                            )
-                            ann_embed.set_image(url="attachment://mega.png")
-                            await ch.send(embed=ann_embed, file=ann_file)
-                        except Exception:
-                            await ch.send(
-                                f"⚡ **MEGA EVOLUTION!** ⚡\n"
-                                f"{interaction.user.mention}'s **{name}** {emoji} has gone Mega!"
-                            )
-                return
-
+        if not usable:
             await interaction.response.send_message(
-                f"Unknown item: **{item}**.\nValid evo stones: `evo_stone_uncommon`, `evo_stone_rare`, `mega_stone`\n"
-                f"Stat items: " + ", ".join(STAT_ITEMS.keys()),
+                "You have no usable items!\nStat items drop from expeditions and `/dig`. "
+                "Evo stones drop from expeditions.",
                 ephemeral=True
             )
+            return
+
+        options = []
+        for item in usable[:25]:
+            key = item["item_key"]
+            itype = item["item_type"]
+            element = item.get("element") or ""
+            qty = item["quantity"]
+
+            if itype == "stat_item":
+                info = STAT_ITEMS.get(key, {})
+                label = f"{info.get('display', key)} ×{qty}"
+                desc = info.get("desc", "")
+                emoji_str = "📦"
+            elif itype == "evo_stone":
+                elem_display = ELEMENT_DISPLAY.get(element, element.title())
+                stone_name = "Uncommon Evo Stone" if key == "evo_stone_uncommon" else "Rare Evo Stone"
+                label = f"{elem_display} {stone_name} ×{qty}"
+                desc = "Evo 1 → 2" if key == "evo_stone_uncommon" else "Evo 2 → 3"
+                emoji_str = "💠"
+            else:  # mega_stone
+                elem_display = ELEMENT_DISPLAY.get(element, element.title())
+                label = f"{elem_display} Mega Stone ×{qty}"
+                desc = "Evo 3 → MEGA ⭐"
+                emoji_str = "⭐"
+
+            options.append(discord.SelectOption(
+                label=label[:100],
+                value=f"{key}|{element}",
+                description=desc[:100],
+                emoji=emoji_str
+            ))
+
+        view = UseView(interaction.user.id, options)
+        embed = discord.Embed(
+            title="🎒 Use an Item",
+            description="Choose an item to use on your active pet.",
+            color=0x7B68EE
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @app_commands.command(name="incubate", description="Place an egg from your inventory to hatch it")
     async def incubate(self, interaction: discord.Interaction):
