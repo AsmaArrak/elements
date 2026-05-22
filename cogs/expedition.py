@@ -622,158 +622,182 @@ class Expedition(commands.Cog):
                 await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
     async def _collect(self, interaction: discord.Interaction):
+        from config import PLAYER_XP_SOURCES, RARITY_EMOJIS
+        now = datetime.now(timezone.utc)
+
         async with aiosqlite.connect(db.DB_PATH) as conn:
             player = await db.get_player(conn, interaction.user.id)
             if not player:
                 await interaction.response.send_message("Use `/start` first.", ephemeral=True)
                 return
-            exp = await db.get_active_expedition(conn, interaction.user.id)
-            if not exp:
+
+            # Fetch ALL active expeditions
+            async with conn.execute(
+                "SELECT * FROM expeditions WHERE player_id=? AND returned=0",
+                (interaction.user.id,)
+            ) as cur:
+                cols = [d[0] for d in cur.description]
+                all_exps = [dict(zip(cols, r)) for r in await cur.fetchall()]
+
+            if not all_exps:
                 await interaction.response.send_message(
-                    "You don't have an active expedition.", ephemeral=True
+                    "You don't have any active expeditions.", ephemeral=True
                 )
                 return
 
-            start = datetime.fromisoformat(exp["start_time"])
-            end = start + timedelta(hours=exp["duration_hrs"])
-            if datetime.now(timezone.utc) < end:
-                remaining = end - datetime.now(timezone.utc)
-                hrs = int(remaining.total_seconds() // 3600)
-                mins = int((remaining.total_seconds() % 3600) // 60)
-                await interaction.response.send_message(
-                    f"Your pet isn't back yet! **{hrs}h {mins}m** remaining.", ephemeral=True
-                )
-                return
-
-            pet = await db.get_pet(conn, exp["pet_id"])
-
-            # Generate loot
-            loot = generate_expedition_loot(exp["duration_hrs"], pet["element"], pet["exploration"])
-
-            # Award loot
-            coin_total = 0
-            loot_items = []
-            for drop in loot:
-                if drop["item_type"] == "coins":
-                    coin_total += drop["qty"]
+            # Split into ready vs still running
+            ready_exps = []
+            pending_msgs = []
+            for ex in all_exps:
+                start = datetime.fromisoformat(ex["start_time"])
+                end = start + timedelta(hours=ex["duration_hrs"])
+                if now >= end:
+                    ready_exps.append(ex)
                 else:
+                    remaining = end - now
+                    hrs = int(remaining.total_seconds() // 3600)
+                    mins = int((remaining.total_seconds() % 3600) // 60)
+                    pet_r = await db.get_pet(conn, ex["pet_id"])
+                    pname = pet_r.get("nickname") or PET_NAMES[pet_r["element"]][pet_r["variant"]][pet_r["stage"]]
+                    pending_msgs.append(f"⏳ **{pname}** — {hrs}h {mins}m left")
+
+            if not ready_exps:
+                msg = "No pets are back yet!\n" + "\n".join(pending_msgs)
+                await interaction.response.send_message(msg, ephemeral=True)
+                return
+
+            # Process every ready expedition
+            embeds = []
+            mega_announcements = []
+
+            for exp in ready_exps:
+                pet = await db.get_pet(conn, exp["pet_id"])
+                dur = exp["duration_hrs"]
+
+                loot = generate_expedition_loot(dur, pet["element"], pet["exploration"])
+                coin_total = 0
+                loot_items = []
+                for drop in loot:
+                    if drop["item_type"] == "coins":
+                        coin_total += drop["qty"]
+                    else:
+                        await db.add_item(
+                            conn, interaction.user.id,
+                            drop["item_key"], drop["item_type"],
+                            drop["qty"], drop.get("element")
+                        )
+                        loot_items.append(drop)
+
+                if coin_total:
+                    await conn.execute(
+                        "UPDATE players SET coins=coins+? WHERE user_id=?",
+                        (coin_total, interaction.user.id)
+                    )
+
+                xp_gain = EXPEDITION_XP.get(dur) or EXPEDITION_XP[min(EXPEDITION_XP, key=lambda k: abs(k - dur))]
+                await db.add_xp(conn, pet["id"], xp_gain)
+
+                exp_gain = EXPLORATION_GAIN.get(dur) or EXPLORATION_GAIN[min(EXPLORATION_GAIN, key=lambda k: abs(k - dur))]
+                new_exploration = min(100, pet["exploration"] + exp_gain)
+                await conn.execute(
+                    "UPDATE pets SET exploration=? WHERE id=?", (new_exploration, pet["id"])
+                )
+
+                scroll_drop = generate_scroll_drop(dur, pet["element"])
+                if scroll_drop:
                     await db.add_item(
                         conn, interaction.user.id,
-                        drop["item_key"], drop["item_type"],
-                        drop["qty"], drop.get("element")
+                        scroll_drop["skill_key"], "scroll", 1, scroll_drop["element"]
                     )
-                    loot_items.append(drop)
 
-            if coin_total:
+                armor_drop = generate_armor_drop(dur, pet["element"])
+                if armor_drop:
+                    await conn.execute(
+                        """INSERT INTO armor_inventory
+                           (player_id, name, rarity, set_name, piece_type, armor_level, armor_xp, sub_stats,
+                            bonus_hp, bonus_atk, bonus_def, bonus_spd, bonus_mgk, bonus_res)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (interaction.user.id, armor_drop["name"], armor_drop["rarity"],
+                         armor_drop.get("set_name"), armor_drop.get("piece_type"), 1, 0, "[]",
+                         armor_drop.get("bonus_hp", 0), armor_drop.get("bonus_atk", 0),
+                         armor_drop.get("bonus_def", 0), armor_drop.get("bonus_spd", 0),
+                         armor_drop.get("bonus_mgk", 0), armor_drop.get("bonus_res", 0))
+                    )
+
+                p_xp = PLAYER_XP_SOURCES.get(f"expedition_{dur}", 10)
+                await db.add_player_xp(conn, interaction.user.id, p_xp)
+
                 await conn.execute(
-                    "UPDATE players SET coins=coins+? WHERE user_id=?",
-                    (coin_total, interaction.user.id)
+                    "UPDATE expeditions SET returned=1 WHERE id=?", (exp["id"],)
                 )
 
-            # XP for pet — fall back to closest key for legacy expedition durations
-            dur = exp["duration_hrs"]
-            xp_gain = EXPEDITION_XP.get(dur) or EXPEDITION_XP[min(EXPEDITION_XP, key=lambda k: abs(k - dur))]
-            await db.add_xp(conn, pet["id"], xp_gain)
+                pet = await db.get_pet(conn, pet["id"])
+                pet_name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
+                emoji = ELEMENT_EMOJIS[pet["element"]]
+                color = ELEMENT_COLORS[pet["element"]]
 
-            # Exploration gain
-            exp_gain = EXPLORATION_GAIN.get(dur) or EXPLORATION_GAIN[min(EXPLORATION_GAIN, key=lambda k: abs(k - dur))]
-            new_exploration = min(100, pet["exploration"] + exp_gain)
-            await conn.execute(
-                "UPDATE pets SET exploration=? WHERE id=?", (new_exploration, pet["id"])
-            )
-
-            # Scroll drop
-            scroll_drop = generate_scroll_drop(exp["duration_hrs"], pet["element"])
-            if scroll_drop:
-                await db.add_item(
-                    conn, interaction.user.id,
-                    scroll_drop["skill_key"], "scroll", 1, scroll_drop["element"]
+                embed = discord.Embed(
+                    title=f"📦 {pet_name} returned!",
+                    description=f"{emoji} **{fmt_dur(dur)} expedition** complete!",
+                    color=color
                 )
 
-            # Armor drop
-            armor_drop = generate_armor_drop(exp["duration_hrs"], pet["element"])
-            if armor_drop:
-                await conn.execute(
-                    """INSERT INTO armor_inventory
-                       (player_id, name, rarity, set_name, piece_type, armor_level, armor_xp, sub_stats,
-                        bonus_hp, bonus_atk, bonus_def, bonus_spd, bonus_mgk, bonus_res)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (interaction.user.id, armor_drop["name"], armor_drop["rarity"],
-                     armor_drop.get("set_name"), armor_drop.get("piece_type"), 1, 0, "[]",
-                     armor_drop.get("bonus_hp", 0), armor_drop.get("bonus_atk", 0),
-                     armor_drop.get("bonus_def", 0), armor_drop.get("bonus_spd", 0),
-                     armor_drop.get("bonus_mgk", 0), armor_drop.get("bonus_res", 0))
+                loot_lines = []
+                mega_found = False
+                for drop in loot_items:
+                    dname = item_display_name_simple(drop["item_key"], drop["item_type"], drop.get("element"))
+                    qty = drop["qty"]
+                    loot_lines.append(f"• **{dname}**" + (f" ×{qty}" if qty > 1 else ""))
+                    if drop["item_type"] == "mega_stone":
+                        mega_found = True
+                if coin_total:
+                    loot_lines.append(f"• **{coin_total} coins** 💰")
+                if scroll_drop:
+                    r_emoji = RARITY_EMOJIS.get(scroll_drop["rarity"], "")
+                    loot_lines.append(f"• {r_emoji} **{scroll_drop['name']} Scroll** 📜")
+                if armor_drop:
+                    r_emoji = RARITY_EMOJIS.get(armor_drop["rarity"], "")
+                    loot_lines.append(f"• {r_emoji} **{armor_drop['name']}** *(armor)*")
+
+                embed.add_field(
+                    name="🎒 Loot",
+                    value="\n".join(loot_lines) if loot_lines else "Nothing this time...",
+                    inline=False
                 )
+                embed.add_field(name="XP", value=f"+{xp_gain}", inline=True)
+                embed.add_field(name="Exploration", value=f"{new_exploration}/100 (+{exp_gain})", inline=True)
+                embeds.append(embed)
 
-            # Player XP for completing expedition
-            from config import PLAYER_XP_SOURCES
-            p_xp_key = f"expedition_{dur}"
-            p_xp = PLAYER_XP_SOURCES.get(p_xp_key, 10)
-            await db.add_player_xp(conn, interaction.user.id, p_xp)
+                if mega_found:
+                    mega_announcements.append((pet_name, pet["element"], emoji))
 
-            # Mark expedition returned
-            await conn.execute(
-                "UPDATE expeditions SET returned=1 WHERE id=?", (exp["id"],)
-            )
+            # Show any still-running expeditions at the bottom
+            if pending_msgs:
+                still_running = discord.Embed(
+                    title="⏳ Still Running",
+                    description="\n".join(pending_msgs),
+                    color=0x95A5A6
+                )
+                embeds.append(still_running)
+
             await conn.commit()
-            pet = await db.get_pet(conn, pet["id"])
 
-        pet_name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
-        emoji = ELEMENT_EMOJIS[pet["element"]]
-        color = ELEMENT_COLORS[pet["element"]]
+        # Discord allows up to 10 embeds per message
+        await interaction.response.send_message(embeds=embeds[:10])
 
-        embed = discord.Embed(
-            title=f"📦 {pet_name} returned from expedition!",
-            description=f"{emoji} **{fmt_dur(exp['duration_hrs'])} expedition** complete!",
-            color=color
-        )
-
-        # Loot display
-        loot_lines = []
-        mega_found = False
-        for drop in loot_items:
-            name = item_display_name_simple(drop["item_key"], drop["item_type"], drop.get("element"))
-            qty = drop["qty"]
-            loot_lines.append(f"• **{name}**" + (f" ×{qty}" if qty > 1 else ""))
-            if drop["item_type"] == "mega_stone":
-                mega_found = True
-        if coin_total:
-            loot_lines.append(f"• **{coin_total} coins** 💰")
-        if scroll_drop:
-            from config import RARITY_EMOJIS
-            r_emoji = RARITY_EMOJIS.get(scroll_drop["rarity"], "")
-            loot_lines.append(f"• {r_emoji} **{scroll_drop['name']} Scroll** 📜 *(skill scroll)*")
-        if armor_drop:
-            from config import RARITY_EMOJIS
-            r_emoji = RARITY_EMOJIS.get(armor_drop["rarity"], "")
-            loot_lines.append(f"• {r_emoji} **{armor_drop['name']}** *(armor)*")
-
-        embed.add_field(
-            name="🎒 Loot Found",
-            value="\n".join(loot_lines) if loot_lines else "Nothing this time...",
-            inline=False
-        )
-        embed.add_field(name="XP Gained", value=f"+{xp_gain} XP", inline=True)
-        embed.add_field(
-            name="Exploration",
-            value=f"{pet['exploration']}/100 (+{exp_gain})",
-            inline=True
-        )
-
-        await interaction.response.send_message(embed=embed)
-
-        # Mega stone server announcement
-        if mega_found and interaction.guild:
-            async with aiosqlite.connect(db.DB_PATH) as cfg_conn:
-                cfg = await db.get_guild_config(cfg_conn, interaction.guild.id)
-            ch_id = cfg.get("announce_channel_id") if cfg else None
-            ch = interaction.guild.get_channel(ch_id) if ch_id else interaction.channel
-            if ch:
-                await ch.send(
-                    f"⚡ **LEGENDARY DROP** ⚡\n"
-                    f"{interaction.user.mention}'s **{pet_name}** discovered a "
-                    f"**{ELEMENT_DISPLAY[pet['element']]} Mega Stone** during exploration! {emoji}"
-                )
+        # Mega stone announcements
+        for pet_name, element, emoji in mega_announcements:
+            if interaction.guild:
+                async with aiosqlite.connect(db.DB_PATH) as cfg_conn:
+                    cfg = await db.get_guild_config(cfg_conn, interaction.guild.id)
+                ch_id = cfg.get("announce_channel_id") if cfg else None
+                ch = interaction.guild.get_channel(ch_id) if ch_id else interaction.channel
+                if ch:
+                    await ch.send(
+                        f"⚡ **LEGENDARY DROP** ⚡\n"
+                        f"{interaction.user.mention}'s **{pet_name}** discovered a "
+                        f"**{ELEMENT_DISPLAY[element]} Mega Stone** during exploration! {emoji}"
+                    )
 
 
 async def setup(bot: commands.Bot):

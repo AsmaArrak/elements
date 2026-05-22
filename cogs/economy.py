@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 import database as db
 from config import (
     ELEMENT_DISPLAY, ELEMENT_EMOJIS, FOOD_ITEMS, SHOP_ITEMS, STAT_ITEMS,
-    DAILY_LOGIN_XP, DAILY_LOGIN_COINS
+    DAILY_LOGIN_XP, DAILY_LOGIN_COINS, PLAYER_XP_SOURCES
 )
 
 GAMBLE_MIN = 50
@@ -575,17 +575,25 @@ class Economy(commands.Cog):
             if pet and pet["stage"] > 0:
                 leveled_info = await db.add_xp(conn, pet["id"], DAILY_LOGIN_XP)
 
+            player_xp_gain = PLAYER_XP_SOURCES.get("daily", 20)
+            player_level_info = await db.add_player_xp(conn, interaction.user.id, player_xp_gain)
+
             await conn.commit()
             new_bal = player["coins"] + DAILY_LOGIN_COINS
 
         embed = discord.Embed(
             title="🌅 Daily Bonus!",
-            description=f"+**{DAILY_LOGIN_COINS} coins** | +**{DAILY_LOGIN_XP} XP**",
+            description=(
+                f"+**{DAILY_LOGIN_COINS} coins** | +**{DAILY_LOGIN_XP} pet XP** | "
+                f"+**{player_xp_gain} player XP**"
+            ),
             color=0xF1C40F
         )
         embed.set_footer(text=f"New balance: {new_bal} coins | Resets every 20 hours.")
         if leveled_info and leveled_info.get("leveled_up"):
-            embed.add_field(name="📈 Level Up!", value=f"Your pet reached Level {leveled_info['level']}!", inline=False)
+            embed.add_field(name="📈 Pet Level Up!", value=f"Your pet reached Level {leveled_info['level']}!", inline=False)
+        if player_level_info and player_level_info.get("leveled_up"):
+            embed.add_field(name="🌟 Player Level Up!", value=f"You reached Player Level {player_level_info['level']}!", inline=False)
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="trade", description="Propose a trade with another player")
