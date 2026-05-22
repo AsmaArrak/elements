@@ -26,6 +26,17 @@ def armor_sell_price(rarity: str) -> int:
     return {"common": 150, "uncommon": 400, "rare": 1000, "legendary": 3000}.get(rarity, 150)
 
 
+def get_equipped_ids(pets: list[dict]) -> set[int]:
+    """Return the set of armor IDs currently equipped across all pets."""
+    equipped = set()
+    for pet in pets:
+        for col in ("slot_crown", "slot_plate", "slot_gauntlets", "slot_greaves"):
+            val = pet.get(col)
+            if val:
+                equipped.add(int(val))
+    return equipped
+
+
 class EquipView(discord.ui.View):
     def __init__(self, user_id: int, pets: list[dict], armor_list: list[dict]):
         super().__init__(timeout=60)
@@ -34,14 +45,23 @@ class EquipView(discord.ui.View):
         self.selected_armor_id = None
         self.pets = pets
         self.armor_list = armor_list
+        equipped_ids = get_equipped_ids(pets)
 
         if len(pets) > 1:
             pet_opts = []
             for p in pets:
                 name = p.get("nickname") or PET_NAMES[p["element"]][p["variant"]][p["stage"]]
+                # Show which slots are filled on this pet
+                slots_filled = [
+                    slot for slot, col in (
+                        ("👑", "slot_crown"), ("🛡️", "slot_plate"),
+                        ("🧤", "slot_gauntlets"), ("👢", "slot_greaves")
+                    ) if p.get(col)
+                ]
+                slot_str = " ".join(slots_filled) if slots_filled else "no armor"
                 pet_opts.append(discord.SelectOption(
                     label=name, value=str(p["id"]),
-                    description=f"Level {p['level']} · {STAGE_NAMES[p['stage']]}",
+                    description=f"Lv {p['level']} · {STAGE_NAMES[p['stage']]} · {slot_str}",
                     emoji=ELEMENT_EMOJIS[p["element"]]
                 ))
             pet_sel = discord.ui.Select(placeholder="Choose a pet...", options=pet_opts, row=0)
@@ -51,9 +71,13 @@ class EquipView(discord.ui.View):
         armor_opts = []
         for ar in armor_list[:25]:
             r_emoji = RARITY_EMOJIS.get(ar["rarity"], "⚪")
+            is_equipped = ar["id"] in equipped_ids
+            equip_tag = "✅ Equipped · " if is_equipped else ""
+            label = ar["name"]
+            desc = f"{equip_tag}{ar['rarity'].title()} · {ar.get('piece_type','?')} · {armor_bonus_line(ar)}"
             armor_opts.append(discord.SelectOption(
-                label=ar["name"], value=str(ar["id"]),
-                description=f"{ar['rarity'].title()} · {armor_bonus_line(ar)[:50]}",
+                label=label, value=str(ar["id"]),
+                description=desc[:100],
                 emoji=r_emoji
             ))
         armor_sel = discord.ui.Select(placeholder="Choose armor to equip...", options=armor_opts, row=1)
@@ -235,7 +259,9 @@ class Armor(commands.Cog):
             ) as cur:
                 cols = [d[0] for d in cur.description]
                 armor_list = [dict(zip(cols, r)) for r in await cur.fetchall()]
+            pets = await db.get_player_pets(conn, interaction.user.id)
 
+        equipped_ids = get_equipped_ids(pets)
         upgradeable = [a for a in armor_list if (a.get("armor_level") or 1) < 15 and a.get("set_name")]
         fodder_pool = [a for a in armor_list if a.get("set_name")]  # any set armor can be fodder
 
@@ -252,7 +278,7 @@ class Armor(commands.Cog):
             )
             return
 
-        view = UpgradeArmorView(interaction.user.id, upgradeable, fodder_pool)
+        view = UpgradeArmorView(interaction.user.id, upgradeable, fodder_pool, equipped_ids)
         await interaction.response.send_message(
             "**🔨 Armor Upgrade**\nSelect the piece to upgrade, then the pieces to sacrifice as fodder:",
             view=view, ephemeral=True
@@ -260,24 +286,27 @@ class Armor(commands.Cog):
 
 
 class UpgradeArmorView(discord.ui.View):
-    def __init__(self, user_id: int, upgradeable: list[dict], all_armor: list[dict]):
+    def __init__(self, user_id: int, upgradeable: list[dict], all_armor: list[dict],
+                 equipped_ids: set[int] | None = None):
         super().__init__(timeout=120)
         self.user_id = user_id
         self.upgradeable = upgradeable
         self.all_armor = all_armor
         self.target_id: int | None = None
         self.fodder_ids: list[int] = []
+        equipped_ids = equipped_ids or set()
 
         # Target select
         target_opts = []
         for a in upgradeable[:25]:
             r_emoji = RARITY_EMOJIS.get(a["rarity"], "⚪")
             lv = a.get("armor_level") or 1
-            elem = ELEMENT_EMOJIS.get(a.get("set_name", ""), "")
+            is_eq = a["id"] in equipped_ids
+            equip_tag = "✅ Equipped · " if is_eq else ""
             target_opts.append(discord.SelectOption(
                 label=f"{a['name']} (Lv {lv})",
                 value=str(a["id"]),
-                description=f"{a['rarity'].title()} · {armor_bonus_line(a)[:40]}",
+                description=f"{equip_tag}{a['rarity'].title()} · {armor_bonus_line(a)[:40]}"[:100],
                 emoji=r_emoji
             ))
         target_sel = discord.ui.Select(placeholder="Piece to UPGRADE...", options=target_opts, row=0)
@@ -290,10 +319,12 @@ class UpgradeArmorView(discord.ui.View):
             r_emoji = RARITY_EMOJIS.get(a["rarity"], "⚪")
             lv = a.get("armor_level") or 1
             xp_val = ARMOR_FODDER_XP.get(a["rarity"], 100)
+            is_eq = a["id"] in equipped_ids
+            equip_tag = "✅ Equipped · " if is_eq else ""
             fodder_opts.append(discord.SelectOption(
                 label=f"{a['name']} (Lv {lv})",
                 value=str(a["id"]),
-                description=f"Gives {xp_val} upgrade XP · {a['rarity'].title()}",
+                description=f"{equip_tag}Gives {xp_val} XP · {a['rarity'].title()}"[:100],
                 emoji=r_emoji
             ))
         fodder_sel = discord.ui.Select(
