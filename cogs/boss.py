@@ -293,6 +293,7 @@ async def _fetch_server_total(boss_id: int) -> int:
 
 async def end_boss_session(session: BossSession):
     """Save session damage to DB and remove from active_boss_sessions."""
+    from config import PLAYER_XP_SOURCES
     active_boss_sessions.pop(session.player_id, None)
     if session.total_damage <= 0:
         return
@@ -306,6 +307,9 @@ async def end_boss_session(session: BossSession):
             "UPDATE boss_battles SET total_damage = total_damage + ? WHERE id = ?",
             (session.total_damage, session.boss_id),
         )
+        # Award player XP for participating in this session
+        session_xp = PLAYER_XP_SOURCES.get("boss_session", 40)
+        await db.add_player_xp(conn, session.player_id, session_xp)
         await conn.commit()
 
 
@@ -693,9 +697,18 @@ class Boss(commands.Cog):
                 rankings = await cur.fetchall()
 
             # Distribute rewards
+            from config import PLAYER_XP_SOURCES
             for rank_idx, (player_id, _damage) in enumerate(rankings):
                 rank = rank_idx + 1
                 coins, armor_count, armor_rarity, scroll_rarity = _get_reward_tier(rank)
+                # Rank-based player XP
+                if rank == 1:
+                    rank_xp = PLAYER_XP_SOURCES.get("boss_rank_1", 200)
+                elif rank <= 3:
+                    rank_xp = PLAYER_XP_SOURCES.get("boss_rank_2" if rank == 2 else "boss_rank_3", 100)
+                else:
+                    rank_xp = PLAYER_XP_SOURCES.get("boss_rank_other", 50)
+                await db.add_player_xp(conn, player_id, rank_xp)
                 await conn.execute(
                     "UPDATE players SET coins=coins+? WHERE user_id=?", (coins, player_id)
                 )

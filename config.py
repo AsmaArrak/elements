@@ -285,11 +285,16 @@ PLAYER_XP_SOURCES = {
     "expedition_6":   80,
     "pet_levelup":    5,    # per pet level gained
     "daily":          20,
-    "battle_win":     15,
-    "battle_loss":     5,
+    "battle_win":     60,
+    "battle_loss":    20,
     "dungeon":        30,
     "fish":            5,
     "dig":             5,
+    "boss_session":   40,   # per boss fight session (flee or wipe)
+    "boss_rank_1":   200,   # end-of-weekend rank rewards
+    "boss_rank_2":   150,
+    "boss_rank_3":   100,
+    "boss_rank_other": 50,
 }
 
 # ── Dungeons ───────────────────────────────────────────────────────────────────
