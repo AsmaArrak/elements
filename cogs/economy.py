@@ -310,6 +310,137 @@ class CoinflipView(discord.ui.View):
         await self._resolve(interaction, "tails")
 
 
+def _sell_prices() -> dict[str, int]:
+    prices = {}
+    for k, v in SHOP_ITEMS.items():
+        prices[k] = v["price"] // 2
+    for k in FOOD_ITEMS:
+        if k not in prices:
+            prices[k] = 10
+    for k in STAT_ITEMS:
+        prices[k] = 80
+    return prices
+
+
+class SellQtyModal(discord.ui.Modal, title="How many to sell?"):
+    amount = discord.ui.TextInput(
+        label="Quantity (or 'all')",
+        placeholder="e.g. 5  or  all",
+        min_length=1,
+        max_length=5,
+    )
+
+    def __init__(self, user_id: int, item_key: str, item_type: str, display: str, price_each: int, owned: int):
+        super().__init__()
+        self.user_id = user_id
+        self.item_key = item_key
+        self.item_type = item_type
+        self.display = display
+        self.price_each = price_each
+        self.owned = owned
+
+    async def on_submit(self, interaction: discord.Interaction):
+        raw = self.amount.value.strip().lower()
+        if raw == "all":
+            qty = self.owned
+        else:
+            try:
+                qty = int(raw)
+                if qty < 1:
+                    raise ValueError
+            except ValueError:
+                await interaction.response.send_message(
+                    "Enter a number (e.g. `5`) or `all`.", ephemeral=True
+                )
+                return
+
+        if qty > self.owned:
+            await interaction.response.send_message(
+                f"You only have **{self.owned}×** {self.display}.", ephemeral=True
+            )
+            return
+
+        total = self.price_each * qty
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            player = await db.get_player(conn, self.user_id)
+            if not player:
+                await interaction.response.send_message("Account not found.", ephemeral=True)
+                return
+            if not await db.has_item(conn, self.user_id, self.item_key, qty):
+                await interaction.response.send_message(
+                    f"You no longer have {qty}× **{self.display}**.", ephemeral=True
+                )
+                return
+            await db.remove_item(conn, self.user_id, self.item_key, qty)
+            await conn.execute(
+                "UPDATE players SET coins=coins+? WHERE user_id=?", (total, self.user_id)
+            )
+            await conn.commit()
+            new_bal = player["coins"] + total
+
+        await interaction.response.send_message(
+            f"💰 Sold **{qty}× {self.display}** for **{total:,} coins**!\n"
+            f"New balance: **{new_bal:,} coins**"
+        )
+
+
+class SellView(discord.ui.View):
+    def __init__(self, user_id: int, sellable: list[dict]):
+        super().__init__(timeout=60)
+        self.user_id = user_id
+        self.sellable = sellable
+        prices = _sell_prices()
+
+        options = []
+        for item in sellable[:25]:
+            key = item["item_key"]
+            qty = item["quantity"]
+            price = prices.get(key, 0)
+            display = (
+                FOOD_ITEMS.get(key, {}).get("display")
+                or STAT_ITEMS.get(key, {}).get("display")
+                or key.title()
+            )
+            options.append(discord.SelectOption(
+                label=f"{display} ×{qty}",
+                value=key,
+                description=f"{price:,} coins each · {price * qty:,} coins total if selling all",
+            ))
+
+        sel = discord.ui.Select(
+            placeholder="💰 Choose an item to sell...",
+            options=options,
+            row=0
+        )
+        sel.callback = self._on_select
+        self.add_item(sel)
+
+    async def _on_select(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your shop!", ephemeral=True)
+            return
+
+        key = interaction.data["values"][0]
+        prices = _sell_prices()
+        price_each = prices.get(key, 0)
+        item = next((i for i in self.sellable if i["item_key"] == key), None)
+        if not item:
+            await interaction.response.send_message("Item not found.", ephemeral=True)
+            return
+
+        display = (
+            FOOD_ITEMS.get(key, {}).get("display")
+            or STAT_ITEMS.get(key, {}).get("display")
+            or key.title()
+        )
+        itype = item["item_type"]
+        owned = item["quantity"]
+
+        await interaction.response.send_modal(
+            SellQtyModal(interaction.user.id, key, itype, display, price_each, owned)
+        )
+
+
 class Economy(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -389,60 +520,35 @@ class Economy(commands.Cog):
         )
 
     @app_commands.command(name="sell", description="Sell an item to the shop for coins")
-    @app_commands.describe(
-        item="Item to sell (food name or stat item key)",
-        qty="How many to sell (default 1)"
-    )
-    async def sell(self, interaction: discord.Interaction, item: str, qty: int = 1):
-        item = item.lower().strip()
-        if qty < 1:
-            await interaction.response.send_message("Quantity must be at least 1.", ephemeral=True)
-            return
-
-        # Determine sell price
-        sell_prices: dict[str, int] = {}
-        for k, v in SHOP_ITEMS.items():
-            sell_prices[k] = v["price"] // 2
-        # Food not in shop sells for less
-        for k in FOOD_ITEMS:
-            if k not in sell_prices:
-                sell_prices[k] = 10
-        for k in STAT_ITEMS:
-            sell_prices[k] = 80
-
-        if item not in sell_prices:
-            await interaction.response.send_message(
-                f"**{item}** can't be sold here.", ephemeral=True
-            )
-            return
-
-        price_each = sell_prices[item]
-        total = price_each * qty
-
+    async def sell(self, interaction: discord.Interaction):
+        prices = _sell_prices()
         async with aiosqlite.connect(db.DB_PATH) as conn:
             player = await db.get_player(conn, interaction.user.id)
             if not player:
                 await interaction.response.send_message("Use `/start` first.", ephemeral=True)
                 return
+            inventory = await db.get_inventory(conn, interaction.user.id)
 
-            # Determine item type
-            item_type = "food" if item in FOOD_ITEMS else "stat_item"
-            if not await db.has_item(conn, interaction.user.id, item, qty):
-                await interaction.response.send_message(
-                    f"You don't have {qty}× **{item}**.", ephemeral=True
-                )
-                return
-            await db.remove_item(conn, interaction.user.id, item, qty)
-            await conn.execute(
-                "UPDATE players SET coins=coins+? WHERE user_id=?", (total, interaction.user.id)
+        # Only show items that have a sell price and qty > 0
+        sellable = [
+            i for i in inventory
+            if i["item_key"] in prices and i["quantity"] > 0
+            and i["item_type"] in ("food", "stat_item")
+        ]
+
+        if not sellable:
+            await interaction.response.send_message(
+                "You have nothing to sell! Food and stat items can be sold here.", ephemeral=True
             )
-            await conn.commit()
-            new_bal = player["coins"] + total
+            return
 
-        display = FOOD_ITEMS.get(item, {}).get("display") or STAT_ITEMS.get(item, {}).get("display") or item.title()
-        await interaction.response.send_message(
-            f"💰 Sold {qty}× **{display}** for **{total} coins**! Balance: **{new_bal} coins**."
+        embed = discord.Embed(
+            title="💰 Sell Items",
+            description="Pick an item — you'll then choose how many to sell.",
+            color=0xF1C40F
         )
+        view = SellView(interaction.user.id, sellable)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @app_commands.command(name="daily", description="Claim your daily login bonus")
     async def daily(self, interaction: discord.Interaction):
