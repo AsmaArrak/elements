@@ -20,7 +20,7 @@ class Help(commands.Cog):
                 "`/start` — Browse all eggs and choose your element\n"
                 "`/profile [@user]` — View your profile or another player's\n"
                 "`/pet` — See full detailed stats and caps\n"
-                "`/rename <name>` — Give your active pet a custom name\n"
+                "`/rename` — Give a pet a custom name\n"
                 "`/restart` — Delete everything and start over"
             ),
             inline=False
@@ -29,9 +29,9 @@ class Help(commands.Cog):
             name="🍖 Feeding & Items",
             value=(
                 "`/feed` — Pick a pet, food, and quantity to feed (egg needs **3 feedings** to hatch!)\n"
-                "`/incubate <element>` — Place an egg from your inventory to start hatching it\n"
+                "`/incubate` — Place an egg from your inventory to start hatching it\n"
                 "`/inventory` — View all your items\n"
-                "`/use <stone> <element>` — Use an evo stone to evolve\n"
+                "`/use` — Use a stat item or evo stone (dropdown picker)\n"
                 "`/claim` — Grab a randomly spawned item from the channel\n"
                 "`/train` — Daily stat boost + XP (20h cooldown)"
             ),
@@ -75,7 +75,7 @@ class Help(commands.Cog):
             value=(
                 "`/learn` — Teach your pet a skill from a scroll\n"
                 "`/skills` — View your pets' learned skills\n"
-                "`/forgetskill <name>` — Forget a skill to free a slot\n"
+                "`/forgetskill` — Forget a skill to free a slot\n"
                 "`/sellscroll <name>` — Sell a scroll for coins\n"
                 "*Scrolls drop from expeditions. Each pet learns up to 4 skills.*"
             ),
@@ -86,7 +86,7 @@ class Help(commands.Cog):
             value=(
                 "`/shop` — Browse the item shop\n"
                 "`/buy <item> [qty]` — Purchase an item (add quantity to buy in bulk)\n"
-                "`/sell <item> [qty]` — Sell items for coins\n"
+                "`/sell` — Sell items for coins (dropdown picker)\n"
                 "`/balance` — Check your coin balance\n"
                 "`/daily` — Claim daily bonus (100 coins + 30 XP)\n"
                 "`/give @user <amount>` — Give coins to someone\n"
@@ -102,11 +102,6 @@ class Help(commands.Cog):
                 "`/trivia` — Answer a question to win coins\n"
                 "`/leaderboard` — See the top pets on the server"
             ),
-            inline=False
-        )
-        embed.add_field(
-            name="🎯 Party",
-            value="`/setparty` — Set your battle party order (first pet starts battles)",
             inline=False
         )
         embed.add_field(

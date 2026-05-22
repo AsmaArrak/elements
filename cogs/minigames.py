@@ -415,6 +415,31 @@ class Minigames(commands.Cog):
 
     @app_commands.command(name="trivia", description="Answer a trivia question to win coins")
     async def trivia(self, interaction: discord.Interaction):
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            player = await db.get_player(conn, interaction.user.id)
+            if not player:
+                await interaction.response.send_message("Use `/start` first.", ephemeral=True)
+                return
+            if player.get("last_trivia"):
+                last = datetime.fromisoformat(player["last_trivia"])
+                diff = datetime.now(timezone.utc) - last
+                cooldown = timedelta(minutes=TRIVIA_COOLDOWN_MINUTES)
+                if diff < cooldown:
+                    remaining = cooldown - diff
+                    mins, secs = divmod(int(remaining.total_seconds()), 60)
+                    time_str = f"{mins}m {secs}s" if mins else f"{secs}s"
+                    await interaction.response.send_message(
+                        f"⏳ You already answered a trivia! Come back in **{time_str}**.",
+                        ephemeral=True
+                    )
+                    return
+            # Record the trivia attempt time now (before showing the question)
+            await conn.execute(
+                "UPDATE players SET last_trivia=? WHERE user_id=?",
+                (db.now_iso(), interaction.user.id)
+            )
+            await conn.commit()
+
         question = random.choice(TRIVIA_QUESTIONS)
         labels = ["A", "B", "C", "D"]
         choices_text = "\n".join(

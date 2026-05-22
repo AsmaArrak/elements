@@ -66,12 +66,13 @@ def pet_embed(pet: dict, owner: discord.User | discord.Member = None) -> tuple[d
     elif stage > 0:
         embed.add_field(name="📈 Level", value="**MAX LEVEL** ⭐", inline=False)
 
-    expl = pet['exploration']
-    embed.add_field(
-        name="🧭 Exploration",
-        value=f"{expl}/100 {'✅' if expl >= 100 else f'({100 - expl} to Mega)'}",
-        inline=True
-    )
+    if stage > 0:
+        expl = pet['exploration']
+        embed.add_field(
+            name="🧭 Exploration",
+            value=f"{expl}/100 {'✅' if expl >= 100 else f'({100 - expl} to Mega)'}",
+            inline=True
+        )
 
     image_path = get_pet_image(element, variant, stage)
     file = discord.File(image_path, filename="pet.png")

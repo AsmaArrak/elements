@@ -294,7 +294,8 @@ class UpgradeArmorView(discord.ui.View):
         self.all_armor = all_armor
         self.target_id: int | None = None
         self.fodder_ids: list[int] = []
-        equipped_ids = equipped_ids or set()
+        self.equipped_ids: set[int] = equipped_ids or set()
+        equipped_ids = self.equipped_ids
 
         # Target select
         target_opts = []
@@ -366,6 +367,20 @@ class UpgradeArmorView(discord.ui.View):
             await interaction.response.send_message(
                 "You can't use the upgrade target as fodder!", ephemeral=True
             )
+            return
+
+        # Warn if any chosen fodder is currently equipped
+        equipped_fodder = [fid for fid in self.fodder_ids if fid in self.equipped_ids]
+        if equipped_fodder:
+            piece_word = "piece" if len(equipped_fodder) == 1 else "pieces"
+            await interaction.response.send_message(
+                f"⚠️ **{len(equipped_fodder)} equipped {piece_word}** selected as fodder!\n"
+                "Sacrificing equipped armor will unequip it from your pet. "
+                "Unequip it first with `/equip` if you didn't mean to, or press **Upgrade** again to confirm.",
+                ephemeral=True
+            )
+            # Remove the equipped pieces from fodder so the user must explicitly re-select
+            self.fodder_ids = [fid for fid in self.fodder_ids if fid not in self.equipped_ids]
             return
 
         self.stop()

@@ -469,8 +469,7 @@ class Economy(commands.Cog):
             display = food_data.get("display", key.title())
             lines.append(f"**{display}** — {data['price']:,} coins | {data['description']}")
         embed.add_field(name="🍖 Food", value="\n".join(lines), inline=False)
-        embed.set_footer(text="Rare items (cake, honey, dragonfruit…) only drop from the world")
-        embed.set_footer(text=f"💰 Your balance: {coins:,} coins · Select an item below to buy in bulk")
+        embed.set_footer(text=f"💰 Your balance: {coins:,} coins · Select an item below to buy in bulk · Rare items (cake, honey, dragonfruit…) only drop in the world")
 
         view = ShopView(interaction.user.id, coins)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
@@ -509,7 +508,8 @@ class Economy(commands.Cog):
             await conn.execute(
                 "UPDATE players SET coins=coins-? WHERE user_id=?", (total, interaction.user.id)
             )
-            await db.add_item(conn, interaction.user.id, item, "food", quantity)
+            item_type = SHOP_ITEMS[item].get("type", "food")
+            await db.add_item(conn, interaction.user.id, item, item_type, quantity)
             await conn.commit()
             new_bal = player["coins"] - total
 
