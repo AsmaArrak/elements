@@ -265,19 +265,18 @@ class CoinflipView(discord.ui.View):
             current_coins = player.get("coins") or 0
 
             if won:
-                winnings = self.bet * 2
                 await conn.execute(
                     "UPDATE players SET coins=coins+? WHERE user_id=?",
-                    (winnings, interaction.user.id)
+                    (self.bet, interaction.user.id)
                 )
                 await conn.commit()
-                new_bal = current_coins + winnings
+                new_bal = current_coins + self.bet
                 embed = discord.Embed(
                     title="🎉 You won!",
                     description=(
                         f"The coin landed on **{result.title()}** {coin_emoji}\n"
                         f"You picked **{player_choice.title()}** — correct!\n\n"
-                        f"**+{winnings:,} coins** 💰"
+                        f"**+{self.bet:,} coins** 💰"
                     ),
                     color=0x2ECC71
                 )
@@ -629,7 +628,7 @@ class Economy(commands.Cog):
             description=f"**{interaction.user.display_name}** is betting **{bet:,} coins**!\nPick your side:",
             color=0xF1C40F
         )
-        embed.set_footer(text="Win: +2× bet · Lose: −bet")
+        embed.set_footer(text="Win: double your bet · Lose: lose your bet")
         await interaction.response.send_message(embed=embed, view=view)
 
     @app_commands.command(name="dice", description="Roll the dice and gamble your coins!")
