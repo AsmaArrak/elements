@@ -380,6 +380,85 @@ class PetViewSelect(discord.ui.View):
         await pet_cog._send_pet_stats(interaction, pet, followup=True)
 
 
+class RenameModal(discord.ui.Modal, title="Rename your pet"):
+    new_name = discord.ui.TextInput(
+        label="New name (leave blank to reset)",
+        placeholder="e.g. Blaze  — max 24 chars",
+        required=False,
+        max_length=24,
+    )
+
+    def __init__(self, pet: dict):
+        super().__init__()
+        self.pet = pet
+
+    async def on_submit(self, interaction: discord.Interaction):
+        nick = self.new_name.value.strip() or None
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            await conn.execute("UPDATE pets SET nickname=? WHERE id=?", (nick, self.pet["id"]))
+            await conn.commit()
+        if nick:
+            await interaction.response.send_message(f"✅ Your pet is now known as **{nick}**! 🎀")
+        else:
+            default = PET_NAMES[self.pet["element"]][self.pet["variant"]][self.pet["stage"]]
+            await interaction.response.send_message(f"✅ Nickname cleared. Back to **{default}**.")
+
+
+class RenamePetPickerView(discord.ui.View):
+    def __init__(self, user_id: int, pets: list[dict]):
+        super().__init__(timeout=60)
+        self.user_id = user_id
+        self.pets = {p["id"]: p for p in pets}
+
+        opts = []
+        for p in pets:
+            name = p.get("nickname") or PET_NAMES[p["element"]][p["variant"]][p["stage"]]
+            opts.append(discord.SelectOption(
+                label=name, value=str(p["id"]),
+                description=f"Level {p['level']} · {STAGE_NAMES[p['stage']]}",
+                emoji=ELEMENT_EMOJIS[p["element"]]
+            ))
+        sel = discord.ui.Select(placeholder="🐾 Choose a pet to rename...", options=opts)
+        sel.callback = self._on_select
+        self.add_item(sel)
+
+    async def _on_select(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your menu!", ephemeral=True)
+            return
+        self.stop()
+        pet = self.pets[int(interaction.data["values"][0])]
+        await interaction.response.send_modal(RenameModal(pet))
+
+
+class TrainPetPickerView(discord.ui.View):
+    def __init__(self, user_id: int, pets: list[dict], train_fn):
+        super().__init__(timeout=60)
+        self.user_id = user_id
+        self.pets = {p["id"]: p for p in pets}
+        self.train_fn = train_fn
+
+        opts = []
+        for p in pets:
+            name = p.get("nickname") or PET_NAMES[p["element"]][p["variant"]][p["stage"]]
+            opts.append(discord.SelectOption(
+                label=name, value=str(p["id"]),
+                description=f"Level {p['level']} · {STAGE_NAMES[p['stage']]}",
+                emoji=ELEMENT_EMOJIS[p["element"]]
+            ))
+        sel = discord.ui.Select(placeholder="🐾 Choose a pet to train...", options=opts)
+        sel.callback = self._on_select
+        self.add_item(sel)
+
+    async def _on_select(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your menu!", ephemeral=True)
+            return
+        self.stop()
+        pet = self.pets[int(interaction.data["values"][0])]
+        await self.train_fn(interaction, pet)
+
+
 class Pet(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -621,20 +700,13 @@ class Pet(commands.Cog):
 
     @app_commands.command(name="train", description="Daily training — boost a random stat and gain XP")
     async def train(self, interaction: discord.Interaction):
-        import random
         async with aiosqlite.connect(db.DB_PATH) as conn:
             player = await db.get_player(conn, interaction.user.id)
             if not player:
                 await interaction.response.send_message("Use `/start` first.", ephemeral=True)
                 return
-            pet = await db.get_active_pet(conn, interaction.user.id)
-            if not pet or pet["stage"] == 0:
-                await interaction.response.send_message(
-                    "Your pet needs to hatch first! Feed it with `/feed`.", ephemeral=True
-                )
-                return
 
-            # Cooldown check
+            # Cooldown check first
             if player["last_train"]:
                 last = datetime.fromisoformat(player["last_train"])
                 if (datetime.now(timezone.utc) - last) < timedelta(hours=TRAIN_COOLDOWN_HOURS):
@@ -646,6 +718,29 @@ class Pet(commands.Cog):
                     )
                     return
 
+            pets = [p for p in await db.get_player_pets(conn, interaction.user.id) if p["stage"] > 0]
+
+        if not pets:
+            await interaction.response.send_message(
+                "Your pet needs to hatch first! Feed it with `/feed`.", ephemeral=True
+            )
+            return
+
+        if len(pets) == 1:
+            await self._do_train(interaction, pets[0])
+            return
+
+        view = TrainPetPickerView(interaction.user.id, pets, self._do_train)
+        embed = discord.Embed(
+            title="💪 Train a Pet",
+            description="Choose which pet to train today:",
+            color=0xF1C40F
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    async def _do_train(self, interaction: discord.Interaction, pet: dict):
+        import random
+        async with aiosqlite.connect(db.DB_PATH) as conn:
             stats = ["hp", "atk", "def", "spd", "mgk", "res"]
             chosen_stat = random.choice(stats)
             actual, capped = apply_stat_bonus(pet, chosen_stat, TRAIN_STAT_BOOST)
@@ -665,7 +760,6 @@ class Pet(commands.Cog):
         name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
         color = ELEMENT_COLORS[pet["element"]]
         cap_note = " *(capped)*" if capped and actual == 0 else ""
-
         embed = discord.Embed(
             title=f"💪 {name} trained hard!",
             description=(
@@ -676,29 +770,36 @@ class Pet(commands.Cog):
             color=color
         )
         embed.set_footer(text="Training resets every 20 hours.")
-        await interaction.response.send_message(embed=embed)
+        if interaction.response.is_done():
+            await interaction.edit_original_response(embed=embed, view=None)
+        else:
+            await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="rename", description="Give your active pet a custom name")
-    @app_commands.describe(name="The new name (leave empty to reset to default)")
-    async def rename(self, interaction: discord.Interaction, name: str = ""):
+    @app_commands.command(name="rename", description="Give one of your pets a custom name")
+    async def rename(self, interaction: discord.Interaction):
         async with aiosqlite.connect(db.DB_PATH) as conn:
             player = await db.get_player(conn, interaction.user.id)
             if not player:
                 await interaction.response.send_message("Use `/start` first.", ephemeral=True)
                 return
-            pet = await db.get_active_pet(conn, interaction.user.id)
-            if not pet:
-                await interaction.response.send_message("No active pet.", ephemeral=True)
-                return
-            nick = name.strip()[:24] if name.strip() else None
-            await conn.execute("UPDATE pets SET nickname=? WHERE id=?", (nick, pet["id"]))
-            await conn.commit()
+            pets = [p for p in await db.get_player_pets(conn, interaction.user.id) if p["stage"] > 0]
 
-        if nick:
-            await interaction.response.send_message(f"Your pet is now known as **{nick}**! 🎀")
-        else:
-            default = PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
-            await interaction.response.send_message(f"Nickname cleared. Back to **{default}**.")
+        if not pets:
+            await interaction.response.send_message("You have no hatched pets to rename.", ephemeral=True)
+            return
+
+        # If only one pet, skip straight to the rename modal
+        if len(pets) == 1:
+            await interaction.response.send_modal(RenameModal(pets[0]))
+            return
+
+        view = RenamePetPickerView(interaction.user.id, pets)
+        embed = discord.Embed(
+            title="🎀 Rename a Pet",
+            description="Choose which pet to rename:",
+            color=0xF1C40F
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
 

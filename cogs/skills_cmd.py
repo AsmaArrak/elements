@@ -140,6 +140,97 @@ class LearnView(discord.ui.View):
         )
 
 
+class ForgetSkillView(discord.ui.View):
+    """Two-step view: pick a pet, then pick the skill to forget."""
+
+    def __init__(self, user_id: int, pets: list[dict], pet_skills: dict[int, list[str]]):
+        super().__init__(timeout=60)
+        self.user_id = user_id
+        self.pets = {p["id"]: p for p in pets}
+        self.pet_skills = pet_skills
+        self.selected_pet_id: int | None = pets[0]["id"] if len(pets) == 1 else None
+
+        # Pet picker (only if >1 pet with skills)
+        if len(pets) > 1:
+            pet_opts = []
+            for p in pets:
+                name = p.get("nickname") or PET_NAMES[p["element"]][p["variant"]][p["stage"]]
+                pet_opts.append(discord.SelectOption(
+                    label=name, value=str(p["id"]),
+                    description=f"Level {p['level']} · {len(pet_skills.get(p['id'], []))} skill(s)",
+                    emoji=ELEMENT_EMOJIS[p["element"]]
+                ))
+            pet_sel = discord.ui.Select(placeholder="🐾 Choose a pet...", options=pet_opts, row=0)
+            pet_sel.callback = self._pet_cb
+            self.add_item(pet_sel)
+
+        # Skill picker — populated from first pet if only one, otherwise shown after pet pick
+        self._build_skill_sel(pets[0]["id"] if len(pets) == 1 else None)
+
+    def _build_skill_sel(self, pet_id: int | None):
+        # Remove old skill select if present
+        for item in list(self.children):
+            if isinstance(item, discord.ui.Select) and getattr(item, "_is_skill_sel", False):
+                self.remove_item(item)
+
+        if pet_id is None:
+            return  # wait for pet selection
+
+        skills = self.pet_skills.get(pet_id, [])
+        if not skills:
+            return
+
+        skill_opts = []
+        for sk in skills:
+            info = SKILLS.get(sk, {})
+            r_emoji = RARITY_EMOJIS.get(info.get("rarity", "common"), "⚪")
+            skill_opts.append(discord.SelectOption(
+                label=info.get("name", sk),
+                value=sk,
+                description=info.get("desc", "")[:100],
+                emoji=r_emoji
+            ))
+        sel = discord.ui.Select(placeholder="📜 Choose skill to forget...", options=skill_opts, row=1)
+        sel.callback = self._skill_cb
+        sel._is_skill_sel = True
+        self.add_item(sel)
+
+    async def _pet_cb(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your menu!", ephemeral=True)
+            return
+        self.selected_pet_id = int(interaction.data["values"][0])
+        self._build_skill_sel(self.selected_pet_id)
+        await interaction.response.edit_message(view=self)
+
+    async def _skill_cb(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your menu!", ephemeral=True)
+            return
+        if not self.selected_pet_id:
+            await interaction.response.send_message("Pick a pet first!", ephemeral=True)
+            return
+
+        self.stop()
+        skill_key = interaction.data["values"][0]
+        pet = self.pets[self.selected_pet_id]
+
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            await conn.execute(
+                "DELETE FROM pet_skills WHERE pet_id=? AND skill_key=?",
+                (pet["id"], skill_key)
+            )
+            await conn.commit()
+
+        pet_name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
+        skill_name = SKILLS.get(skill_key, {}).get("name", skill_key)
+        embed = discord.Embed(
+            description=f"🗑️ **{pet_name}** forgot **{skill_name}**. Slot is now free.",
+            color=0xE74C3C
+        )
+        await interaction.response.edit_message(embed=embed, view=None)
+
+
 class SkillsCmd(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -213,36 +304,33 @@ class SkillsCmd(commands.Cog):
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @app_commands.command(name="forgetskill", description="Make your pet forget a skill to make room")
-    @app_commands.describe(skill_name="The skill name to forget")
-    async def forgetskill(self, interaction: discord.Interaction, skill_name: str):
+    @app_commands.command(name="forgetskill", description="Make one of your pets forget a skill to free a slot")
+    async def forgetskill(self, interaction: discord.Interaction):
         async with aiosqlite.connect(db.DB_PATH) as conn:
-            pet = await db.get_active_pet(conn, interaction.user.id)
-            if not pet or pet["stage"] == 0:
-                await interaction.response.send_message("No hatched active pet.", ephemeral=True)
-                return
-            # Find skill key by name
-            skill_key = next(
-                (k for k, v in SKILLS.items() if v["name"].lower() == skill_name.lower()), None
-            )
-            if not skill_key:
-                await interaction.response.send_message(f"Skill `{skill_name}` not found.", ephemeral=True)
-                return
-            async with conn.execute(
-                "SELECT 1 FROM pet_skills WHERE pet_id=? AND skill_key=?", (pet["id"], skill_key)
-            ) as cur:
-                if not await cur.fetchone():
-                    await interaction.response.send_message("Your pet doesn't know that skill.", ephemeral=True)
-                    return
-            await conn.execute(
-                "DELETE FROM pet_skills WHERE pet_id=? AND skill_key=?", (pet["id"], skill_key)
-            )
-            await conn.commit()
+            pets = [p for p in await db.get_player_pets(conn, interaction.user.id) if p["stage"] > 0]
+            # Fetch learned skills for each pet
+            pet_skills: dict[int, list[str]] = {}
+            for p in pets:
+                async with conn.execute(
+                    "SELECT skill_key FROM pet_skills WHERE pet_id=?", (p["id"],)
+                ) as cur:
+                    pet_skills[p["id"]] = [r[0] for r in await cur.fetchall()]
 
-        pet_name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
-        await interaction.response.send_message(
-            f"**{pet_name}** forgot **{SKILLS[skill_key]['name']}**.", ephemeral=True
+        # Only include pets that have at least one learned skill
+        pets_with_skills = [p for p in pets if pet_skills.get(p["id"])]
+        if not pets_with_skills:
+            await interaction.response.send_message(
+                "None of your pets have learned any skills yet!", ephemeral=True
+            )
+            return
+
+        view = ForgetSkillView(interaction.user.id, pets_with_skills, pet_skills)
+        embed = discord.Embed(
+            title="🗑️ Forget a Skill",
+            description="Choose a pet, then the skill to forget.",
+            color=0xE74C3C
         )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @app_commands.command(name="sellscroll", description="Sell a skill scroll for coins")
     @app_commands.describe(skill_name="The scroll name to sell")

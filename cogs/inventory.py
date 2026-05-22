@@ -5,7 +5,7 @@ import aiosqlite
 
 import database as db
 from config import (
-    ELEMENT_DISPLAY, ELEMENT_EMOJIS, ELEMENT_COLORS, PET_NAMES, FOOD_ITEMS,
+    ELEMENT_DISPLAY, ELEMENT_EMOJIS, ELEMENT_COLORS, PET_NAMES, STAGE_NAMES, FOOD_ITEMS,
     STAT_ITEMS, ACCELERATORS, get_stone_image
 )
 from game.evolution import evolve_pet, can_evolve_to
@@ -34,27 +34,53 @@ def item_display_name(item_key: str, item_type: str, element: str = None) -> str
 
 
 class UseView(discord.ui.View):
-    """Dropdown to pick a stat item or evo stone to use on your active pet."""
+    """Pet picker + item picker to use a stat item or evo stone."""
 
-    def __init__(self, user_id: int, options: list[discord.SelectOption]):
+    def __init__(self, user_id: int, pets: list[dict], item_options: list[discord.SelectOption]):
         super().__init__(timeout=60)
         self.user_id = user_id
+        self.pets = pets
+        self.selected_pet_id: int | None = pets[0]["id"] if len(pets) == 1 else None
 
-        sel = discord.ui.Select(
+        # Pet picker (only shown if >1 pet)
+        if len(pets) > 1:
+            pet_opts = []
+            for p in pets:
+                name = p.get("nickname") or PET_NAMES[p["element"]][p["variant"]][p["stage"]]
+                pet_opts.append(discord.SelectOption(
+                    label=name, value=str(p["id"]),
+                    description=f"Level {p['level']} · {STAGE_NAMES[p['stage']]}",
+                    emoji=ELEMENT_EMOJIS[p["element"]]
+                ))
+            pet_sel = discord.ui.Select(placeholder="🐾 Choose a pet...", options=pet_opts, row=0)
+            pet_sel.callback = self._pet_cb
+            self.add_item(pet_sel)
+
+        item_sel = discord.ui.Select(
             placeholder="🎒 Choose an item to use...",
-            options=options,
-            row=0
+            options=item_options,
+            row=1
         )
-        sel.callback = self._on_select
-        self.add_item(sel)
+        item_sel.callback = self._on_select
+        self.add_item(item_sel)
+
+    async def _pet_cb(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your menu!", ephemeral=True)
+            return
+        self.selected_pet_id = int(interaction.data["values"][0])
+        await interaction.response.defer()
 
     async def _on_select(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("This isn't your menu!", ephemeral=True)
             return
+        if not self.selected_pet_id:
+            await interaction.response.send_message("Pick a pet first!", ephemeral=True)
+            return
 
         self.stop()
-        # Value format: "item_key|element"  (element is empty string for stat items)
+        # Value format: "item_key|element"
         raw = interaction.data["values"][0]
         item_key, element = raw.split("|", 1)
         element = element or None
@@ -64,9 +90,9 @@ class UseView(discord.ui.View):
             if not player:
                 await interaction.response.edit_message(content="❌ Account not found.", embed=None, view=None)
                 return
-            pet = await db.get_active_pet(conn, interaction.user.id)
+            pet = await db.get_pet(conn, self.selected_pet_id)
             if not pet:
-                await interaction.response.edit_message(content="❌ No active pet.", embed=None, view=None)
+                await interaction.response.edit_message(content="❌ Pet not found.", embed=None, view=None)
                 return
 
             exp = await db.get_active_expedition(conn, interaction.user.id)
@@ -389,7 +415,7 @@ class Inventory(commands.Cog):
         embed.set_footer(text=f"💰 {player['coins']} coins")
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="use", description="Use a stat item or evolution stone on your active pet")
+    @app_commands.command(name="use", description="Use a stat item or evolution stone on a pet")
     async def use(self, interaction: discord.Interaction):
         async with aiosqlite.connect(db.DB_PATH) as conn:
             player = await db.get_player(conn, interaction.user.id)
@@ -397,11 +423,17 @@ class Inventory(commands.Cog):
                 await interaction.response.send_message("Use `/start` first.", ephemeral=True)
                 return
             inventory = await db.get_inventory(conn, interaction.user.id)
+            pets = [p for p in await db.get_player_pets(conn, interaction.user.id) if p["stage"] > 0]
 
         # Filter to only usable item types
         usable_types = {"stat_item", "evo_stone", "mega_stone"}
         usable = [i for i in inventory if i["item_type"] in usable_types and i["quantity"] > 0]
 
+        if not pets:
+            await interaction.response.send_message(
+                "You need a hatched pet to use items!", ephemeral=True
+            )
+            return
         if not usable:
             await interaction.response.send_message(
                 "You have no usable items!\nStat items drop from expeditions and `/dig`. "
@@ -441,12 +473,9 @@ class Inventory(commands.Cog):
                 emoji=emoji_str
             ))
 
-        view = UseView(interaction.user.id, options)
-        embed = discord.Embed(
-            title="🎒 Use an Item",
-            description="Choose an item to use on your active pet.",
-            color=0x7B68EE
-        )
+        view = UseView(interaction.user.id, pets, options)
+        desc = "Choose a pet and an item to use." if len(pets) > 1 else "Choose an item to use on your pet."
+        embed = discord.Embed(title="🎒 Use an Item", description=desc, color=0x7B68EE)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @app_commands.command(name="incubate", description="Place an egg from your inventory to hatch it")
