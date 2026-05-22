@@ -403,6 +403,7 @@ class UpgradeArmorView(discord.ui.View):
 
             # Check player coins
             player = await db.get_player(conn, self.user_id)
+            player_coins = player.get("coins") or 0
             current_armor_xp = target.get("armor_xp") or 0
             armor_xp = current_armor_xp + total_xp
 
@@ -415,11 +416,11 @@ class UpgradeArmorView(discord.ui.View):
                 needed = xp_to_next_armor_level(new_level)
                 if needed is None or armor_xp < needed:
                     break
-                # Calculate coin cost for this level-up
+                # Check BEFORE adding so total_coins never exceeds what player can afford
                 coin_cost = ARMOR_UPGRADE_COINS.get(new_level, 500)
-                total_coins += coin_cost
-                if (player.get("coins") or 0) < total_coins:
+                if player_coins < total_coins + coin_cost:
                     break
+                total_coins += coin_cost
                 armor_xp -= needed
                 new_level += 1
                 # Unlock substat if at unlock level
@@ -429,15 +430,19 @@ class UpgradeArmorView(discord.ui.View):
                         sub_stats.append(new_ss)
                         new_substats_gained.append(new_ss)
 
-            if new_level == current_level and total_coins == 0:
-                # No level up happened — just store the XP
+            # Final hard check — never deduct more than the player has
+            if total_coins > player_coins:
+                await interaction.response.send_message(
+                    f"❌ Not enough coins! Need **{total_coins:,}**, you have **{player_coins:,}**.",
+                    ephemeral=True
+                )
+                return
+
+            if new_level == current_level:
+                # No level up — just store the XP progress
                 await conn.execute(
                     "UPDATE armor_inventory SET armor_xp=? WHERE id=?",
                     (armor_xp, self.target_id)
-                )
-                await conn.execute(
-                    "UPDATE players SET coins=coins-? WHERE user_id=?",
-                    (0, self.user_id)
                 )
             else:
                 # Deduct coins
