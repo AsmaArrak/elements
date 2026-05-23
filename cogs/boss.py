@@ -194,6 +194,7 @@ class BossSession:
         self.log: list[str] = []
         self.message: discord.Message | None = None
         self.pet_img_url: str | None = None
+        self._damage_saved = False  # guard against double-saving
 
     @property
     def current(self) -> BossCombatant:
@@ -295,8 +296,9 @@ async def end_boss_session(session: BossSession):
     """Save session damage to DB and remove from active_boss_sessions."""
     from config import PLAYER_XP_SOURCES
     active_boss_sessions.pop(session.player_id, None)
-    if session.total_damage <= 0:
+    if session._damage_saved or session.total_damage <= 0:
         return
+    session._damage_saved = True
     async with aiosqlite.connect(db.DB_PATH) as conn:
         await conn.execute(
             """INSERT INTO boss_damage_log(boss_id, player_id, damage) VALUES(?,?,?)
@@ -407,6 +409,7 @@ class BossBattleView(discord.ui.View):
         server_total = await _fetch_server_total(session.boss_id)
 
         if session.all_fainted:
+            self.stop()
             await end_boss_session(session)
             embed = build_boss_embed(session, server_total)
             embed.color = 0x888888
@@ -549,6 +552,7 @@ class BossBattleView(discord.ui.View):
             return
         session = self.session
         total = session.total_damage
+        self.stop()
         await end_boss_session(session)
         embed = discord.Embed(
             title="🏃 Fled from the Boss!",
