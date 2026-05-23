@@ -187,6 +187,10 @@ async def do_feed(pet: dict, item_key: str, user_id: int, channel) -> tuple[disc
     return embed, file, stat_key, actual_boost, xp_gain
 
 
+# Tracks the currently open FeedView per user so duplicate sessions are killed
+_active_feed_views: dict[int, "FeedView"] = {}
+
+
 class FeedView(discord.ui.View):
     def __init__(self, user_id: int, pets: list[dict], food_inv: list[dict],
                  original_interaction: discord.Interaction):
@@ -222,14 +226,27 @@ class FeedView(discord.ui.View):
             await interaction.response.send_message("Please select a food item first.", ephemeral=True)
             return
 
+        # Check live inventory from DB — prevents duplicate sessions using the same item
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            inventory = await db.get_inventory(conn, self.user_id)
+        live_qty = next(
+            (i["quantity"] for i in inventory if i["item_key"] == self.selected_food and i["item_type"] == "food"),
+            0
+        )
         qty = self.selected_qty
-        max_have = self._food_max.get(self.selected_food, 0)
-        if qty > max_have:
+        if live_qty <= 0:
             await interaction.response.send_message(
-                f"You only have {max_have}× of that food.", ephemeral=True
+                "❌ You don't have that food anymore!", ephemeral=True
+            )
+            return
+        if qty > live_qty:
+            await interaction.response.send_message(
+                f"❌ You only have **{live_qty}×** of that food now.", ephemeral=True
             )
             return
 
+        # Invalidate any other open feed session for this user
+        _active_feed_views.pop(self.user_id, None)
         self.stop()
         await interaction.response.defer()
 
@@ -691,7 +708,13 @@ class Pet(commands.Cog):
                 )
                 return
 
+        # Kill any existing open feed session for this user
+        old_view = _active_feed_views.get(interaction.user.id)
+        if old_view:
+            old_view.stop()
+
         view = FeedView(interaction.user.id, feedable, food_inv, interaction)
+        _active_feed_views[interaction.user.id] = view
         embed = discord.Embed(
             title="🍽️ Feed a pet",
             description="Select a pet and a food item below, then click **Feed**.",
