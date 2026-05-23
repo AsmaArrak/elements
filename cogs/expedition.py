@@ -724,7 +724,8 @@ class Expedition(commands.Cog):
                          armor_drop.get("bonus_mgk", 0), armor_drop.get("bonus_res", 0))
                     )
 
-                p_xp = PLAYER_XP_SOURCES.get(f"expedition_{dur}", 10)
+                dur_key = int(dur) if dur == int(dur) else dur
+                p_xp = PLAYER_XP_SOURCES.get(f"expedition_{dur_key}", 10)
                 await db.add_player_xp(conn, interaction.user.id, p_xp)
 
                 await conn.execute(
