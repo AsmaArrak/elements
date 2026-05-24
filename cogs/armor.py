@@ -329,6 +329,10 @@ class EquipView(discord.ui.View):
                     f"Unknown piece type '{piece_type}'. Cannot equip.", ephemeral=True
                 )
                 return
+            # Unequip the chosen piece from wherever it currently lives
+            # (handles: same piece on another pet, same piece on same pet's other slot)
+            await db.unequip_armor_id(conn, self.selected_armor_id, self.user_id)
+            # Now put it in the correct slot — old piece is naturally displaced
             await conn.execute(
                 f"UPDATE pets SET {slot_col}=? WHERE id=?",
                 (self.selected_armor_id, self.selected_pet["id"])
