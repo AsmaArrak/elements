@@ -45,8 +45,11 @@ def generate_armor_piece(element: str, rarity: str) -> dict:
     return piece
 
 
-def generate_dungeon_loot(dungeon_key: str, player_level: int) -> list[dict]:
-    """Generate 3–4 armor pieces for a dungeon run."""
+EGG_DROP_CHANCE = 0.04  # 4% chance per dungeon run
+
+def generate_dungeon_loot(dungeon_key: str, player_level: int) -> tuple[list[dict], str | None]:
+    """Generate 3–4 armor pieces for a dungeon run.
+    Returns (pieces, egg_element) where egg_element is set on a 4% chance."""
     dungeon = DUNGEONS[dungeon_key]
     tier    = get_player_tier(player_level)
     count   = 3 + (1 if random.random() < 0.6 else 0)
@@ -55,7 +58,9 @@ def generate_dungeon_loot(dungeon_key: str, player_level: int) -> list[dict]:
         element = random.choice(dungeon["elements"])
         rarity  = roll_rarity(tier)
         pieces.append(generate_armor_piece(element, rarity))
-    return pieces
+
+    egg_element = random.choice(dungeon["elements"]) if random.random() < EGG_DROP_CHANCE else None
+    return pieces, egg_element
 
 
 # ── Armor upgrade helpers ──────────────────────────────────────────────────────

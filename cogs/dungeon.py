@@ -6,7 +6,7 @@ import aiosqlite
 import database as db
 from config import (
     DUNGEONS, DUNGEON_SHARD_COST, MOON_SHARD_CAP, MOON_SHARD_REGEN_MINS,
-    ARMOR_SETS, RARITY_EMOJIS, ELEMENT_EMOJIS, PLAYER_XP_SOURCES,
+    ARMOR_SETS, RARITY_EMOJIS, ELEMENT_EMOJIS, ELEMENT_DISPLAY, PLAYER_XP_SOURCES,
     player_xp_for_next_level, PLAYER_LEVEL_CAP,
 )
 from game.dungeon_loot import generate_dungeon_loot
@@ -50,9 +50,9 @@ class Dungeon(commands.Cog):
             player_level = player.get("player_level") or 1
 
             # Generate loot
-            pieces = generate_dungeon_loot(dungeon.value, player_level)
+            pieces, egg_element = generate_dungeon_loot(dungeon.value, player_level)
 
-            # Save to DB
+            # Save armor to DB
             for piece in pieces:
                 await conn.execute(
                     """INSERT INTO armor_inventory
@@ -65,6 +65,10 @@ class Dungeon(commands.Cog):
                      piece.get("bonus_def", 0), piece.get("bonus_spd", 0),
                      piece.get("bonus_mgk", 0), piece.get("bonus_res", 0))
                 )
+
+            # Egg drop
+            if egg_element:
+                await db.add_item(conn, interaction.user.id, "egg", "egg", 1, egg_element)
 
             # Coin reward
             import random
@@ -103,6 +107,14 @@ class Dungeon(commands.Cog):
             lines.append(f"{r_emoji} {elem_emoji} **{piece['name']}** — {stat_str}")
 
         embed.add_field(name="🎁 Armor Dropped", value="\n".join(lines), inline=False)
+        if egg_element:
+            elem_display = ELEMENT_DISPLAY.get(egg_element, egg_element.title())
+            egg_emoji = ELEMENT_EMOJIS.get(egg_element, "🥚")
+            embed.add_field(
+                name="🥚 Rare Find!",
+                value=f"{egg_emoji} A **{elem_display} Egg** dropped from the dungeon! *(4% chance)*",
+                inline=False
+            )
         embed.add_field(name="💰 Coins", value=f"+**{coins_gained:,}**", inline=True)
         embed.add_field(
             name="🌙 Moon Shards",
