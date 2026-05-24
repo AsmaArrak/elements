@@ -12,7 +12,6 @@ from config import (
 )
 
 GAMBLE_MIN = 50
-GAMBLE_MAX = 10_000
 
 # In-memory pending trades: trade_id -> TradeState
 pending_trades: dict[int, dict] = {}
@@ -720,11 +719,11 @@ class Economy(commands.Cog):
     # ── Gambling ──────────────────────────────────────────────────────────────
 
     @app_commands.command(name="coinflip", description="Bet coins on a coin flip — double or nothing!")
-    @app_commands.describe(bet="Amount of coins to bet (50–10,000)")
+    @app_commands.describe(bet="Amount of coins to bet (min 50)")
     async def coinflip(self, interaction: discord.Interaction, bet: int):
-        if bet < GAMBLE_MIN or bet > GAMBLE_MAX:
+        if bet < GAMBLE_MIN:
             await interaction.response.send_message(
-                f"Bet must be between **{GAMBLE_MIN:,}** and **{GAMBLE_MAX:,}** coins.", ephemeral=True
+                f"Minimum bet is **{GAMBLE_MIN:,}** coins.", ephemeral=True
             )
             return
         async with aiosqlite.connect(db.DB_PATH) as conn:
@@ -748,11 +747,11 @@ class Economy(commands.Cog):
         await interaction.response.send_message(embed=embed, view=view)
 
     @app_commands.command(name="dice", description="Roll the dice and gamble your coins!")
-    @app_commands.describe(bet="Amount of coins to bet (50–10,000)")
+    @app_commands.describe(bet="Amount of coins to bet (min 50)")
     async def dice(self, interaction: discord.Interaction, bet: int):
-        if bet < GAMBLE_MIN or bet > GAMBLE_MAX:
+        if bet < GAMBLE_MIN:
             await interaction.response.send_message(
-                f"Bet must be between **{GAMBLE_MIN:,}** and **{GAMBLE_MAX:,}** coins.", ephemeral=True
+                f"Minimum bet is **{GAMBLE_MIN:,}** coins.", ephemeral=True
             )
             return
         async with aiosqlite.connect(db.DB_PATH) as conn:
