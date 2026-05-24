@@ -396,7 +396,7 @@ def build_boss_embed(session: BossSession, server_total: int = 0) -> discord.Emb
     if session.pet_img_url:
         embed.set_thumbnail(url=session.pet_img_url)
 
-    embed.set_footer(text="Turn " + str(session.turn) + " · Use 🏃 Flee to save progress anytime!")
+    embed.set_footer(text="Turn " + str(session.turn) + " · Fight until your last pet falls!")
     return embed
 
 
@@ -455,27 +455,6 @@ class PetSwitchView(discord.ui.View):
             sel.callback = sel_cb
             self.add_item(sel)
 
-        # Always give option to flee from the switch screen too
-        flee_btn = discord.ui.Button(label="🏃 Flee", style=discord.ButtonStyle.secondary, row=1)
-        async def flee_cb(interaction: discord.Interaction):
-            if interaction.user.id != session.player_id:
-                await interaction.response.send_message("Not your battle!", ephemeral=True)
-                return
-            total = session.total_damage
-            self.stop()
-            await end_boss_session(session)
-            embed = discord.Embed(
-                title="🏃 Fled from the Boss!",
-                description=(
-                    f"You retreated from **{session.boss_def['name']}**!\n"
-                    f"Total damage dealt: **{total:,}**\n"
-                    f"*Progress saved! Rewards distributed at the weekend's end.*"
-                ),
-                color=0x888888,
-            )
-            await interaction.response.edit_message(embed=embed, view=None)
-        flee_btn.callback = flee_cb
-        self.add_item(flee_btn)
 
     async def on_timeout(self):
         await end_boss_session(self.session)
@@ -718,25 +697,6 @@ class BossBattleView(discord.ui.View):
         sv.add_item(switch_select)
         await interaction.response.send_message("Switch to:", view=sv, ephemeral=True)
 
-    @discord.ui.button(label="🏃 Flee", style=discord.ButtonStyle.secondary, row=0)
-    async def flee_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.session.player_id:
-            await interaction.response.send_message("This isn't your battle!", ephemeral=True)
-            return
-        session = self.session
-        total = session.total_damage
-        self.stop()
-        await end_boss_session(session)
-        embed = discord.Embed(
-            title="🏃 Fled from the Boss!",
-            description=(
-                f"You retreated from **{session.boss_def['name']}**!\n"
-                f"Total damage dealt: **{total:,}**\n"
-                f"*Progress saved! Rewards distributed at the weekend's end.*"
-            ),
-            color=0x888888,
-        )
-        await interaction.response.edit_message(embed=embed, view=None)
 
     async def on_timeout(self):
         session = self.session
@@ -978,7 +938,7 @@ class Boss(commands.Cog):
 
         if interaction.user.id in active_boss_sessions:
             await interaction.response.send_message(
-                "You're already in a boss battle session! Finish or flee your current session first.",
+                "You're already in a boss battle session! Finish your current session first.",
                 ephemeral=True,
             )
             return
