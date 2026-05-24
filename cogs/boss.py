@@ -372,6 +372,94 @@ def build_boss_embed(session: BossSession, server_total: int = 0) -> discord.Emb
     return embed
 
 
+# ── Pet Switch View (shown when a pet faints mid-battle) ──────────────────────
+
+class PetSwitchView(discord.ui.View):
+    """Shown when the active pet faints — player must choose the next pet."""
+
+    def __init__(self, session: "BossSession"):
+        super().__init__(timeout=120)
+        self.session = session
+
+        alive = session.alive_indices
+        options = []
+        for i in alive:
+            c = session.combatants[i]
+            options.append(discord.SelectOption(
+                label=c.name,
+                value=str(i),
+                description=f"HP: {c.hp}/{c.max_hp} · ATK {c.stats['atk']} · MGK {c.stats['mgk']}",
+                emoji=ELEMENT_EMOJIS.get(c.element, "🐾"),
+            ))
+
+        if len(options) == 1:
+            # Only one pet left — show a simple button instead of a dropdown
+            btn = discord.ui.Button(
+                label=f"Send {session.combatants[alive[0]].name}!",
+                style=discord.ButtonStyle.success,
+                emoji="⚔️",
+            )
+            async def single_cb(interaction: discord.Interaction):
+                if interaction.user.id != session.player_id:
+                    await interaction.response.send_message("Not your battle!", ephemeral=True)
+                    return
+                self.stop()
+                session.active_idx = alive[0]
+                session.log.append(f"➡️ **{session.current.name}** entered the battle!")
+                server_total = await _fetch_server_total(session.boss_id)
+                embed = build_boss_embed(session, server_total)
+                await interaction.response.edit_message(embed=embed, view=BossBattleView(session))
+            btn.callback = single_cb
+            self.add_item(btn)
+        else:
+            sel = discord.ui.Select(placeholder="Choose your next pet...", options=options)
+            async def sel_cb(interaction: discord.Interaction):
+                if interaction.user.id != session.player_id:
+                    await interaction.response.send_message("Not your battle!", ephemeral=True)
+                    return
+                self.stop()
+                idx = int(sel.values[0])
+                session.active_idx = idx
+                session.log.append(f"➡️ **{session.current.name}** entered the battle!")
+                server_total = await _fetch_server_total(session.boss_id)
+                embed = build_boss_embed(session, server_total)
+                await interaction.response.edit_message(embed=embed, view=BossBattleView(session))
+            sel.callback = sel_cb
+            self.add_item(sel)
+
+        # Always give option to flee from the switch screen too
+        flee_btn = discord.ui.Button(label="🏃 Flee", style=discord.ButtonStyle.secondary, row=1)
+        async def flee_cb(interaction: discord.Interaction):
+            if interaction.user.id != session.player_id:
+                await interaction.response.send_message("Not your battle!", ephemeral=True)
+                return
+            total = session.total_damage
+            self.stop()
+            await end_boss_session(session)
+            embed = discord.Embed(
+                title="🏃 Fled from the Boss!",
+                description=(
+                    f"You retreated from **{session.boss_def['name']}**!\n"
+                    f"Total damage dealt: **{total:,}**\n"
+                    f"*Progress saved! Rewards distributed at the weekend's end.*"
+                ),
+                color=0x888888,
+            )
+            await interaction.response.edit_message(embed=embed, view=None)
+        flee_btn.callback = flee_cb
+        self.add_item(flee_btn)
+
+    async def on_timeout(self):
+        await end_boss_session(self.session)
+        if self.session.message:
+            try:
+                embed = build_boss_embed(self.session)
+                embed.set_footer(text="⏰ Session timed out — damage saved!")
+                await self.session.message.edit(embed=embed, view=None)
+            except Exception:
+                pass
+
+
 # ── Boss Battle View ───────────────────────────────────────────────────────────
 
 class BossBattleView(discord.ui.View):
@@ -395,35 +483,42 @@ class BossBattleView(discord.ui.View):
 
         session.log.extend(logs)
 
-        # Handle pet fainting
+        session.turn += 1
+        server_total = await _fetch_server_total(session.boss_id)
+
+        # Handle pet fainting — pause and ask player to send next pet
         if not session.current.alive:
             fainted_name = session.current.name
             session.log.append(f"💀 **{fainted_name}** fainted!")
-            alive = session.alive_indices
-            if alive:
-                session.active_idx = alive[0]
-                session.log.append(f"➡️ **{session.current.name}** entered the battle!")
 
-        session.turn += 1
+            if session.all_fainted:
+                self.stop()
+                await end_boss_session(session)
+                embed = build_boss_embed(session, server_total)
+                embed.color = 0x888888
+                embed.add_field(
+                    name="💀 All Pets Fainted!",
+                    value=(
+                        f"Your raid session is over!\n"
+                        f"Total damage dealt: **{session.total_damage:,}**\n"
+                        f"*Rewards distributed at the end of the weekend!*"
+                    ),
+                    inline=False,
+                )
+                if session.message:
+                    await session.message.edit(embed=embed, view=None)
+                return
 
-        server_total = await _fetch_server_total(session.boss_id)
-
-        if session.all_fainted:
-            self.stop()
-            await end_boss_session(session)
+            # Still have pets — show switch prompt, don't auto-switch
             embed = build_boss_embed(session, server_total)
-            embed.color = 0x888888
             embed.add_field(
-                name="💀 All Pets Fainted!",
-                value=(
-                    f"Your raid session is over!\n"
-                    f"Total damage dealt: **{session.total_damage:,}**\n"
-                    f"*Rewards distributed at the end of the weekend!*"
-                ),
+                name=f"💀 {fainted_name} fainted!",
+                value="Choose your next pet to continue the raid!",
                 inline=False,
             )
+            switch_view = PetSwitchView(session)
             if session.message:
-                await session.message.edit(embed=embed, view=None)
+                await session.message.edit(embed=embed, view=switch_view)
             return
 
         embed = build_boss_embed(session, server_total)
