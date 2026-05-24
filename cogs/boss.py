@@ -474,11 +474,15 @@ class BossBattleView(discord.ui.View):
             return
 
         move_select = discord.ui.Select(placeholder="Choose a move...", options=options)
+        sv = discord.ui.View(timeout=30)
+        sv.add_item(move_select)
 
         async def move_callback(inter: discord.Interaction):
             if inter.user.id != interaction.user.id:
                 await inter.response.send_message("Not your menu!", ephemeral=True)
                 return
+            # Dismiss the move picker immediately so it can't be reused
+            sv.stop()
             val = move_select.values[0]
             entry = move_map[val]
             if entry[0] == "default":
@@ -496,10 +500,16 @@ class BossBattleView(discord.ui.View):
                 label = s.get("name", sk_key)
             await inter.response.send_message(f"⚔️ **{label}** — GO!", ephemeral=True)
             await self._execute_turn(action)
+            # If battle ended, update the "Choose a move" message to reflect that
+            if self.session._damage_saved or self.session.all_fainted:
+                try:
+                    await interaction.edit_original_response(
+                        content="💀 Battle over — all pets fainted!", view=None
+                    )
+                except Exception:
+                    pass
 
         move_select.callback = move_callback
-        sv = discord.ui.View(timeout=30)
-        sv.add_item(move_select)
         await interaction.response.send_message("Choose a move:", view=sv, ephemeral=True)
 
     @discord.ui.button(label="🔄 Switch", style=discord.ButtonStyle.secondary, row=0)
