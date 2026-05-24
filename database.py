@@ -215,6 +215,17 @@ async def init_db():
             await db.commit()
         except Exception:
             pass
+        # Migration: boss leveling system
+        for col, default in [
+            ("boss_level", "1"),
+            ("boss_current_hp", "5000"),
+            ("boss_max_hp", "5000"),
+        ]:
+            try:
+                await db.execute(f"ALTER TABLE boss_battles ADD COLUMN {col} INTEGER DEFAULT {default}")
+                await db.commit()
+            except Exception:
+                pass
         # Migration: armor upgrade columns
         for col_sql in [
             "ALTER TABLE armor_inventory ADD COLUMN armor_level INTEGER DEFAULT 1",

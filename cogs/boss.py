@@ -137,6 +137,23 @@ def get_current_boss_def() -> dict:
     return BOSS_DEFINITIONS[week % len(BOSS_DEFINITIONS)]
 
 
+def boss_max_hp(level: int) -> int:
+    """HP pool for a given boss level. Grows steeply each level."""
+    return int(5000 * level * (1.5 ** (level - 1)))
+
+
+def boss_stats_at_level(boss_def: dict, level: int) -> dict:
+    """Return boss base stats scaled by level (+15% per level above 1)."""
+    mult = 1.0 + 0.15 * (level - 1)
+    return {
+        "base_atk": int(boss_def["base_atk"] * mult),
+        "base_mgk": int(boss_def["base_mgk"] * mult),
+        "base_def": int(boss_def.get("base_def", 80) * mult),
+        "base_res": int(boss_def.get("base_res", 60) * mult),
+        "base_spd": int(boss_def.get("base_spd", 50) * mult),
+    }
+
+
 def _get_reward_tier(rank: int) -> tuple[int, int, str, str]:
     """Returns (coins, armor_count, armor_rarity, scroll_rarity)."""
     for tier_min, tier_max, coins, armor_count, armor_rarity, scroll_rarity in BOSS_REWARD_TIERS:
@@ -183,7 +200,8 @@ class BossCombatant:
 
 
 class BossSession:
-    def __init__(self, player_id: int, boss_id: int, boss_def: dict, pets: list[dict]):
+    def __init__(self, player_id: int, boss_id: int, boss_def: dict, pets: list[dict],
+                 boss_level: int = 1, boss_current_hp: int = 0, boss_max_hp_val: int = 0):
         self.player_id = player_id
         self.boss_id = boss_id
         self.boss_def = boss_def
@@ -195,6 +213,10 @@ class BossSession:
         self.message: discord.Message | None = None
         self.pet_img_url: str | None = None
         self._damage_saved = False  # guard against double-saving
+        # Boss level tracking (refreshed from DB each turn)
+        self.boss_level = boss_level
+        self.boss_current_hp = boss_current_hp if boss_current_hp > 0 else boss_max_hp(boss_level)
+        self.boss_max_hp_val = boss_max_hp_val if boss_max_hp_val > 0 else boss_max_hp(boss_level)
 
     @property
     def current(self) -> BossCombatant:
@@ -212,12 +234,13 @@ class BossSession:
 # ── Damage calculation ─────────────────────────────────────────────────────────
 
 def calc_player_damage_to_boss(
-    attacker: BossCombatant, boss_def: dict, move_info: dict
+    attacker: BossCombatant, boss_def: dict, move_info: dict, boss_level: int = 1
 ) -> tuple[int, str]:
     """Player pet attacks the boss. Returns (damage, log_line)."""
     move_type = move_info.get("move", "default")
-    boss_def_val = boss_def["base_def"]
-    boss_res_val = boss_def["base_res"]
+    scaled = boss_stats_at_level(boss_def, boss_level)
+    boss_def_val = scaled["base_def"]
+    boss_res_val = scaled["base_res"]
     boss_element = boss_def["element"]
 
     if move_type == "default":
@@ -258,16 +281,17 @@ def calc_player_damage_to_boss(
 
 
 def calc_boss_damage_to_pet(
-    boss_def: dict, defender: BossCombatant
+    boss_def: dict, defender: BossCombatant, boss_level: int = 1
 ) -> tuple[int, str]:
     """Boss attacks player pet. Returns (damage, log_line). Also applies damage."""
     ability = random.choice(boss_def["abilities"])
     boss_element = boss_def["element"]
+    scaled = boss_stats_at_level(boss_def, boss_level)
 
     if ability["type"] == "physical":
-        base = max(1, boss_def["base_atk"] - defender.stats["def"] // 2)
+        base = max(1, scaled["base_atk"] - defender.stats["def"])
     else:
-        base = max(1, boss_def["base_mgk"] - defender.stats["res"] // 2)
+        base = max(1, scaled["base_mgk"] - defender.stats["res"])
 
     se = ""
     if defender.element in TYPE_ADVANTAGE.get(boss_element, []):
@@ -326,15 +350,19 @@ def build_boss_embed(session: BossSession, server_total: int = 0) -> discord.Emb
         title=f"{boss['emoji']} BOSS RAID — {boss['name']}",
         description=(
             f"*{boss['description']}*\n"
-            f"⚠️ **This boss cannot be defeated** — deal as much damage as you can!"
+            f"⚔️ Drain the boss's HP — each level it grows **stronger and tankier**!"
         ),
         color=color,
     )
 
     elem_display = ELEMENT_DISPLAY.get(boss["element"], boss["element"].title())
+    hp_bar_str = hp_bar(session.boss_current_hp, session.boss_max_hp_val, 14)
     embed.add_field(
-        name=f"{boss['emoji']} {boss['name']}",
-        value=f"Element: **{elem_display}**\n🛡️ **Unkillable Raid Boss**",
+        name=f"{boss['emoji']} {boss['name']} — Lv {session.boss_level}",
+        value=(
+            f"Element: **{elem_display}**\n"
+            f"HP: `{hp_bar_str}` {max(0, session.boss_current_hp):,}/{session.boss_max_hp_val:,}"
+        ),
         inline=True,
     )
 
@@ -473,12 +501,52 @@ class BossBattleView(discord.ui.View):
         logs = []
 
         # Player attacks boss
-        p_dmg, p_log = calc_player_damage_to_boss(session.current, session.boss_def, action)
+        p_dmg, p_log = calc_player_damage_to_boss(
+            session.current, session.boss_def, action, session.boss_level
+        )
         session.total_damage += p_dmg
         logs.append(p_log)
 
+        # Apply damage to boss HP in DB and check for level-up
+        leveled_up = False
+        new_level = session.boss_level
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            await conn.execute(
+                "UPDATE boss_battles SET boss_current_hp = MAX(0, boss_current_hp - ?), total_damage = total_damage + ? WHERE id=?",
+                (p_dmg, p_dmg, session.boss_id)
+            )
+            await conn.commit()
+            async with conn.execute(
+                "SELECT boss_level, boss_current_hp, boss_max_hp FROM boss_battles WHERE id=?",
+                (session.boss_id,)
+            ) as cur:
+                row = await cur.fetchone()
+            if row:
+                new_level, current_hp, max_hp = row
+                if current_hp <= 0:
+                    # Boss HP depleted — level it up
+                    new_level += 1
+                    new_max = boss_max_hp(new_level)
+                    await conn.execute(
+                        "UPDATE boss_battles SET boss_level=?, boss_current_hp=?, boss_max_hp=? WHERE id=?",
+                        (new_level, new_max, new_max, session.boss_id)
+                    )
+                    await conn.commit()
+                    leveled_up = True
+                    current_hp = new_max
+                    max_hp = new_max
+                session.boss_level = new_level
+                session.boss_current_hp = current_hp
+                session.boss_max_hp_val = max_hp
+
+        if leveled_up:
+            logs.append(
+                f"⚡ **{session.boss_def['name']} reached Level {new_level}!** "
+                f"It grew stronger! HP restored to **{session.boss_max_hp_val:,}**!"
+            )
+
         # Boss retaliates
-        _b_dmg, b_log = calc_boss_damage_to_pet(session.boss_def, session.current)
+        _b_dmg, b_log = calc_boss_damage_to_pet(session.boss_def, session.current, session.boss_level)
         logs.append(b_log)
 
         session.log.extend(logs)
@@ -729,12 +797,15 @@ class Boss(commands.Cog):
             hour=0, minute=0, second=0, microsecond=0
         )
 
+        start_hp = boss_max_hp(1)
         async with aiosqlite.connect(db.DB_PATH) as conn:
             await conn.execute("UPDATE boss_battles SET active=0 WHERE active=1")
             cur = await conn.execute(
-                """INSERT INTO boss_battles(boss_name, boss_element, spawn_time, end_time, active)
-                   VALUES(?,?,?,?,1)""",
-                (boss_def["name"], boss_def["element"], now.isoformat(), end_time.isoformat()),
+                """INSERT INTO boss_battles(boss_name, boss_element, spawn_time, end_time, active,
+                       boss_level, boss_current_hp, boss_max_hp)
+                   VALUES(?,?,?,?,1, 1,?,?)""",
+                (boss_def["name"], boss_def["element"], now.isoformat(), end_time.isoformat(),
+                 start_hp, start_hp),
             )
             await conn.commit()
 
@@ -892,7 +963,7 @@ class Boss(commands.Cog):
     async def bossbattle(self, interaction: discord.Interaction):
         async with aiosqlite.connect(db.DB_PATH) as conn:
             async with conn.execute(
-                "SELECT id, boss_name, boss_element FROM boss_battles WHERE active=1"
+                "SELECT id, boss_name, boss_element, boss_level, boss_current_hp, boss_max_hp FROM boss_battles WHERE active=1"
             ) as cur:
                 boss_row = await cur.fetchone()
 
@@ -903,7 +974,7 @@ class Boss(commands.Cog):
             )
             return
 
-        boss_id, boss_name, boss_element = boss_row
+        boss_id, boss_name, boss_element, b_level, b_hp, b_max_hp = boss_row
 
         if interaction.user.id in active_boss_sessions:
             await interaction.response.send_message(
@@ -938,7 +1009,12 @@ class Boss(commands.Cog):
             get_current_boss_def(),
         )
 
-        session = BossSession(interaction.user.id, boss_id, boss_def, battle_pets)
+        session = BossSession(
+            interaction.user.id, boss_id, boss_def, battle_pets,
+            boss_level=b_level or 1,
+            boss_current_hp=b_hp or 0,
+            boss_max_hp_val=b_max_hp or 0,
+        )
         active_boss_sessions[interaction.user.id] = session
 
         # Pet image
@@ -970,7 +1046,9 @@ class Boss(commands.Cog):
     async def bossleaderboard(self, interaction: discord.Interaction):
         async with aiosqlite.connect(db.DB_PATH) as conn:
             async with conn.execute(
-                "SELECT id, boss_name, boss_element, total_damage FROM boss_battles WHERE active=1"
+                """SELECT id, boss_name, boss_element, total_damage,
+                          boss_level, boss_current_hp, boss_max_hp
+                   FROM boss_battles WHERE active=1"""
             ) as cur:
                 boss_row = await cur.fetchone()
 
@@ -981,7 +1059,10 @@ class Boss(commands.Cog):
                 )
                 return
 
-            boss_id, boss_name, boss_element, total_dmg = boss_row
+            boss_id, boss_name, boss_element, total_dmg, b_level, b_hp, b_max_hp = boss_row
+            b_level = b_level or 1
+            b_hp = b_hp or 0
+            b_max_hp = b_max_hp or boss_max_hp(b_level)
 
             async with conn.execute(
                 """SELECT player_id, damage FROM boss_damage_log
@@ -992,9 +1073,13 @@ class Boss(commands.Cog):
 
         color = ELEMENT_COLORS.get(boss_element, 0xFFD700)
         elem_emoji = ELEMENT_EMOJIS.get(boss_element, "⚔️")
+        hp_bar_str = hp_bar(b_hp, b_max_hp, 14)
         embed = discord.Embed(
             title=f"{elem_emoji} Boss Raid Leaderboard — {boss_name}",
-            description=f"🌍 **Total Server Damage:** {total_dmg:,}",
+            description=(
+                f"**Level {b_level}** · HP: `{hp_bar_str}` {b_hp:,}/{b_max_hp:,}\n"
+                f"🌍 **Total Server Damage:** {total_dmg:,}"
+            ),
             color=color,
         )
 
