@@ -9,7 +9,7 @@ from config import (
     FOOD_ITEMS, TRAIN_XP, TRAIN_STAT_BOOST, TRAIN_COOLDOWN_HOURS,
     get_pet_image, get_food_image, xp_for_next_level, stat_cap
 )
-from game.stats import effective_stats, hp_bar, apply_stat_bonus, calc_base_stats
+from game.stats import effective_stats, hp_bar, apply_stat_bonus
 from game.evolution import evolve_pet
 from datetime import datetime, timezone, timedelta
 

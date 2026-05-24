@@ -570,10 +570,12 @@ class Economy(commands.Cog):
                 (DAILY_LOGIN_COINS, db.now_iso(), interaction.user.id)
             )
 
-            pet = await db.get_active_pet(conn, interaction.user.id)
+            # Give XP to the first hatched pet in party slot order
+            all_pets = await db.get_player_pets(conn, interaction.user.id)
+            lead_pet = next((p for p in all_pets if p["stage"] > 0), None)
             leveled_info = None
-            if pet and pet["stage"] > 0:
-                leveled_info = await db.add_xp(conn, pet["id"], DAILY_LOGIN_XP)
+            if lead_pet:
+                leveled_info = await db.add_xp(conn, lead_pet["id"], DAILY_LOGIN_XP)
 
             player_xp_gain = PLAYER_XP_SOURCES.get("daily", 20)
             player_level_info = await db.add_player_xp(conn, interaction.user.id, player_xp_gain)

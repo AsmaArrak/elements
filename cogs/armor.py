@@ -10,7 +10,7 @@ from config import (
     ARMOR_SETS, ARMOR_LEVEL_XP, ARMOR_UPGRADE_COINS, ARMOR_FODDER_XP,
     ARMOR_SUBSTAT_UNLOCK_LEVELS, ARMOR_LEVEL_MULT,
 )
-from game.dungeon_loot import effective_armor_stats, roll_substat, xp_to_next_armor_level
+from game.dungeon_loot import roll_substat, xp_to_next_armor_level
 
 
 def armor_bonus_line(row: dict) -> str:
