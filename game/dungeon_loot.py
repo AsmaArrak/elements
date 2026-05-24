@@ -45,7 +45,7 @@ def generate_armor_piece(element: str, rarity: str) -> dict:
     return piece
 
 
-EGG_DROP_CHANCE = 0.04  # 4% chance per dungeon run
+EGG_DROP_CHANCE = 0.15  # 15% chance per dungeon run (OLD: 4%)
 
 def generate_dungeon_loot(dungeon_key: str, player_level: int) -> tuple[list[dict], str | None]:
     """Generate 3–4 armor pieces for a dungeon run.

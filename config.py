@@ -126,26 +126,29 @@ EVO_REQUIREMENTS = {
 
 FOOD_ITEMS = {
     # Common — all 6 stats covered
-    "apple":    {"stat": "hp",  "boost": 5,  "rarity": "common",   "xp": 20, "display": "Apple 🍎"},
-    "bread":    {"stat": "def", "boost": 4,  "rarity": "common",   "xp": 20, "display": "Bread 🍞"},
-    "carrot":   {"stat": "spd", "boost": 5,  "rarity": "common",   "xp": 20, "display": "Carrot 🥕"},
-    "cheese":   {"stat": "atk", "boost": 5,  "rarity": "common",   "xp": 20, "display": "Cheese 🧀"},
-    "grape":    {"stat": "res", "boost": 5,  "rarity": "common",   "xp": 20, "display": "Grape 🍇"},
-    "mushroom": {"stat": "mgk", "boost": 5,  "rarity": "common",   "xp": 20, "display": "Mushroom 🍄"},
+    # OLD XP: 20 each
+    "apple":    {"stat": "hp",  "boost": 5,  "rarity": "common",   "xp": 60,  "display": "Apple 🍎"},
+    "bread":    {"stat": "def", "boost": 4,  "rarity": "common",   "xp": 60,  "display": "Bread 🍞"},
+    "carrot":   {"stat": "spd", "boost": 5,  "rarity": "common",   "xp": 60,  "display": "Carrot 🥕"},
+    "cheese":   {"stat": "atk", "boost": 5,  "rarity": "common",   "xp": 60,  "display": "Cheese 🧀"},
+    "grape":    {"stat": "res", "boost": 5,  "rarity": "common",   "xp": 60,  "display": "Grape 🍇"},
+    "mushroom": {"stat": "mgk", "boost": 5,  "rarity": "common",   "xp": 60,  "display": "Mushroom 🍄"},
     # Uncommon — all 6 stats covered
-    "chicken":  {"stat": "atk", "boost": 8,  "rarity": "uncommon", "xp": 35, "display": "Chicken 🍗"},
-    "fish":     {"stat": "mgk", "boost": 8,  "rarity": "uncommon", "xp": 35, "display": "Fish 🐟"},
-    "berry":    {"stat": "res", "boost": 8,  "rarity": "uncommon", "xp": 35, "display": "Berry 🫐"},
-    "steak":    {"stat": "def", "boost": 8,  "rarity": "uncommon", "xp": 35, "display": "Steak 🥩"},
-    "noodles":  {"stat": "spd", "boost": 8,  "rarity": "uncommon", "xp": 35, "display": "Noodles 🍜"},
-    "potion":   {"stat": "hp",  "boost": 12, "rarity": "uncommon", "xp": 35, "display": "Potion 🧪"},
+    # OLD XP: 35 each
+    "chicken":  {"stat": "atk", "boost": 8,  "rarity": "uncommon", "xp": 100, "display": "Chicken 🍗"},
+    "fish":     {"stat": "mgk", "boost": 8,  "rarity": "uncommon", "xp": 100, "display": "Fish 🐟"},
+    "berry":    {"stat": "res", "boost": 8,  "rarity": "uncommon", "xp": 100, "display": "Berry 🫐"},
+    "steak":    {"stat": "def", "boost": 8,  "rarity": "uncommon", "xp": 100, "display": "Steak 🥩"},
+    "noodles":  {"stat": "spd", "boost": 8,  "rarity": "uncommon", "xp": 100, "display": "Noodles 🍜"},
+    "potion":   {"stat": "hp",  "boost": 12, "rarity": "uncommon", "xp": 100, "display": "Potion 🧪"},
     # Rare — all 6 stats covered
-    "cake":     {"stat": "hp",  "boost": 20, "rarity": "rare",     "xp": 60, "display": "Cake 🎂"},
-    "honey":    {"stat": "mgk", "boost": 18, "rarity": "rare",     "xp": 60, "display": "Honey 🍯"},
-    "dragonfruit": {"stat": "atk", "boost": 18, "rarity": "rare",  "xp": 60, "display": "Dragonfruit 🐉"},
-    "ironbark":    {"stat": "def", "boost": 18, "rarity": "rare",  "xp": 60, "display": "Ironbark 🪵"},
-    "windleaf":    {"stat": "spd", "boost": 18, "rarity": "rare",  "xp": 60, "display": "Windleaf 🍃"},
-    "starfruit":   {"stat": "res", "boost": 18, "rarity": "rare",  "xp": 60, "display": "Starfruit ⭐"},
+    # OLD XP: 60 each
+    "cake":        {"stat": "hp",  "boost": 20, "rarity": "rare", "xp": 180, "display": "Cake 🎂"},
+    "honey":       {"stat": "mgk", "boost": 18, "rarity": "rare", "xp": 180, "display": "Honey 🍯"},
+    "dragonfruit": {"stat": "atk", "boost": 18, "rarity": "rare", "xp": 180, "display": "Dragonfruit 🐉"},
+    "ironbark":    {"stat": "def", "boost": 18, "rarity": "rare", "xp": 180, "display": "Ironbark 🪵"},
+    "windleaf":    {"stat": "spd", "boost": 18, "rarity": "rare", "xp": 180, "display": "Windleaf 🍃"},
+    "starfruit":   {"stat": "res", "boost": 18, "rarity": "rare", "xp": 180, "display": "Starfruit ⭐"},
 }
 
 SHOP_ITEMS = {
@@ -226,10 +229,10 @@ BATTLE_LOSS_COINS = 20
 EXPEDITION_XP = {0.5: 20, 1.5: 45, 4: 90, 6: 150}
 EXPLORATION_GAIN = {0.5: 3, 1.5: 8, 4: 20, 6: 35}
 
-DAILY_LOGIN_XP = 30
+DAILY_LOGIN_XP = 80    # OLD: 30
 DAILY_LOGIN_COINS = 100
 
-TRAIN_XP = 20
+TRAIN_XP = 60          # OLD: 20
 TRAIN_STAT_BOOST = 3
 TRAIN_COOLDOWN_HOURS = 20
 
@@ -279,21 +282,22 @@ def player_xp_for_next_level(level: int) -> int:
     return level * 200   # 200, 400, ..., 11800
 
 PLAYER_XP_SOURCES = {
-    "expedition_0.5": 10,
-    "expedition_1.5": 25,
-    "expedition_4":   50,
-    "expedition_6":   80,
-    "pet_levelup":    5,    # per pet level gained
-    "daily":          20,
-    "battle_win":     60,
-    "battle_loss":    20,
-    "dungeon":        30,
-    "fish":            5,
-    "dig":             5,
-    "boss_session":   40,   # per boss fight session (flee or wipe)
-    "boss_rank_1":   200,   # end-of-weekend rank rewards
-    "boss_rank_2":   150,
-    "boss_rank_3":   100,
+    # OLD: expedition_0.5=10, _1.5=25, _4=50, _6=80
+    "expedition_0.5":  40,
+    "expedition_1.5":  80,
+    "expedition_4":   150,
+    "expedition_6":   250,
+    "pet_levelup":      5,   # per pet level gained
+    "daily":           50,   # OLD: 20
+    "battle_win":      60,
+    "battle_loss":     20,
+    "dungeon":         80,   # OLD: 30
+    "fish":            15,   # OLD: 5
+    "dig":             15,   # OLD: 5
+    "boss_session":    40,   # per boss fight session (wipe)
+    "boss_rank_1":    200,   # end-of-weekend rank rewards
+    "boss_rank_2":    150,
+    "boss_rank_3":    100,
     "boss_rank_other": 50,
 }
 

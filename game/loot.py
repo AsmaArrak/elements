@@ -104,6 +104,9 @@ def _pick_from(table: list, pet_element: str) -> dict:
 
 # ── Main generator ────────────────────────────────────────────────────────────
 
+# Flat egg drop chance per expedition (OLD: eggs only appeared as uncommon loot table rolls)
+EGG_DROP_CHANCE = 0.20  # 20% flat chance regardless of duration
+
 def generate_expedition_loot(duration_hrs: float, pet_element: str, exploration: int) -> list[dict]:
     # 3–8 items depending on duration
     count_ranges = {0.5: (3, 4), 1.5: (4, 5), 4: (5, 7), 6: (6, 8)}
@@ -127,6 +130,11 @@ def generate_expedition_loot(duration_hrs: float, pet_element: str, exploration:
         if rarity == "legendary" and exploration < 100:
             rarity = "very_rare"
         results.append(_pick_from(TABLE_MAP[rarity], pet_element))
+
+    # Flat 20% egg bonus drop (on top of normal loot)
+    if random.random() < EGG_DROP_CHANCE:
+        egg_element = random.choice(ELEMENTS)
+        results.append({"item_key": "egg", "item_type": "egg", "qty": 1, "element": egg_element})
 
     return results
 
