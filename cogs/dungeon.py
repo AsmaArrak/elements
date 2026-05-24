@@ -112,7 +112,7 @@ class Dungeon(commands.Cog):
             egg_emoji = ELEMENT_EMOJIS.get(egg_element, "🥚")
             embed.add_field(
                 name="🥚 Rare Find!",
-                value=f"{egg_emoji} A **{elem_display} Egg** dropped from the dungeon! *(4% chance)*",
+                value=f"{egg_emoji} A **{elem_display} Egg** dropped from the dungeon!",
                 inline=False
             )
         embed.add_field(name="💰 Coins", value=f"+**{coins_gained:,}**", inline=True)
