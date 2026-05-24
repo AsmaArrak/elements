@@ -354,8 +354,8 @@ class EquipView(discord.ui.View):
 
 class UpgradeArmorView(discord.ui.View):
     """
-    Phase 1: rarity filter for target + rarity filter for fodder.
-    Phase 2: filtered target select + filtered fodder select + upgrade button.
+    If upgradeable ≤ 25 AND fodder pool ≤ 25: show both selects directly (no filter step).
+    Otherwise: phase 1 = rarity filters, phase 2 = filtered selects.
     """
 
     def __init__(self, user_id: int, upgradeable: list[dict], all_armor: list[dict],
@@ -369,12 +369,16 @@ class UpgradeArmorView(discord.ui.View):
         self.fodder_ids: list[int] = []
         self.target_rarity: str | None = None
         self.fodder_rarity: str | None = None
-        self._phase1()
+        # Skip rarity filter when both pools fit in a single select
+        self._needs_filter = len(upgradeable) > 25 or len(all_armor) > 25
+        if self._needs_filter:
+            self._phase1()
+        else:
+            self._build_selects(self.upgradeable, self.all_armor, show_back=False)
 
     # ── builders ─────────────────────────────────────────────────────────────
 
     def _rarity_opts(self, pool: list[dict], label_prefix: str) -> list[discord.SelectOption]:
-        """Build rarity filter options for only rarities present in pool."""
         present = {a["rarity"] for a in pool}
         opts = []
         for r in RARITY_ORDER:
@@ -392,8 +396,6 @@ class UpgradeArmorView(discord.ui.View):
         self.clear_items()
 
         t_opts = self._rarity_opts(self.upgradeable, "upgradeable")
-        if not t_opts:
-            return
         t_sel = discord.ui.Select(
             placeholder="1️⃣ Target rarity (piece to upgrade)...",
             options=t_opts, row=0
@@ -402,8 +404,6 @@ class UpgradeArmorView(discord.ui.View):
         self.add_item(t_sel)
 
         f_opts = self._rarity_opts(self.all_armor, "fodder")
-        if not f_opts:
-            return
         f_sel = discord.ui.Select(
             placeholder="2️⃣ Fodder rarity (pieces to sacrifice)...",
             options=f_opts, row=1
@@ -417,11 +417,10 @@ class UpgradeArmorView(discord.ui.View):
         go_btn.callback = self._go_cb
         self.add_item(go_btn)
 
-    def _phase2(self):
+    def _build_selects(self, t_pool: list[dict], f_pool: list[dict], show_back: bool = True):
+        """Render target + fodder selects from the given pools."""
         self.clear_items()
 
-        # Target select
-        t_pool = [a for a in self.upgradeable if a["rarity"] == self.target_rarity]
         t_opts = []
         for a in t_pool[:25]:
             r_emoji = RARITY_EMOJIS.get(a["rarity"], "⚪")
@@ -434,12 +433,10 @@ class UpgradeArmorView(discord.ui.View):
                 description=f"{equip_tag}{a['rarity'].title()} · {armor_bonus_line(a)[:40]}"[:100],
                 emoji=r_emoji
             ))
-        t_sel = discord.ui.Select(placeholder="3️⃣ Piece to UPGRADE...", options=t_opts, row=0)
+        t_sel = discord.ui.Select(placeholder="Piece to UPGRADE...", options=t_opts, row=0)
         t_sel.callback = self._target_cb
         self.add_item(t_sel)
 
-        # Fodder select — filter by chosen rarity, sort common-first within that rarity
-        f_pool = [a for a in self.all_armor if a["rarity"] == self.fodder_rarity]
         f_opts = []
         for a in f_pool[:25]:
             r_emoji = RARITY_EMOJIS.get(a["rarity"], "⚪")
@@ -454,19 +451,20 @@ class UpgradeArmorView(discord.ui.View):
                 emoji=r_emoji
             ))
         f_sel = discord.ui.Select(
-            placeholder="4️⃣ Fodder to SACRIFICE (up to 4)...",
+            placeholder="Fodder to SACRIFICE (up to 4)...",
             options=f_opts, row=1,
             min_values=1, max_values=min(4, len(f_opts))
         )
         f_sel.callback = self._fodder_cb
         self.add_item(f_sel)
 
-        # Back button + upgrade button
-        back_btn = discord.ui.Button(label="◀ Back", style=discord.ButtonStyle.secondary, row=2)
-        back_btn.callback = self._back_cb
-        self.add_item(back_btn)
+        btn_row = 2
+        if show_back:
+            back_btn = discord.ui.Button(label="◀ Back", style=discord.ButtonStyle.secondary, row=btn_row)
+            back_btn.callback = self._back_cb
+            self.add_item(back_btn)
 
-        upg_btn = discord.ui.Button(label="🔨 Upgrade", style=discord.ButtonStyle.success, row=2)
+        upg_btn = discord.ui.Button(label="🔨 Upgrade", style=discord.ButtonStyle.success, row=btn_row)
         upg_btn.callback = self._upgrade_cb
         self.add_item(upg_btn)
 
@@ -498,7 +496,9 @@ class UpgradeArmorView(discord.ui.View):
         if not self.fodder_rarity:
             await interaction.response.send_message("Choose a fodder rarity first.", ephemeral=True)
             return
-        self._phase2()
+        t_pool = [a for a in self.upgradeable if a["rarity"] == self.target_rarity]
+        f_pool = [a for a in self.all_armor if a["rarity"] == self.fodder_rarity]
+        self._build_selects(t_pool, f_pool, show_back=True)
         await interaction.response.edit_message(
             content=(
                 f"**🔨 Armor Upgrade** — Target: `{self.target_rarity.title()}` · "
