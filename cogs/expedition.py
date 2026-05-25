@@ -63,6 +63,19 @@ class ExpeditionPetSelect(discord.ui.View):
         await interaction.response.defer()
 
         async with aiosqlite.connect(db.DB_PATH) as conn:
+            # Live check — prevent double-send if this window was still open
+            async with conn.execute(
+                "SELECT id FROM expeditions WHERE pet_id=? AND returned=0",
+                (pet["id"],)
+            ) as cur:
+                already = await cur.fetchone()
+            if already:
+                pet_name = pet.get("nickname") or PET_NAMES[pet["element"]][pet["variant"]][pet["stage"]]
+                await interaction.followup.send(
+                    f"❌ **{pet_name}** is already on an expedition!", ephemeral=True
+                )
+                return
+
             await conn.execute(
                 "INSERT INTO expeditions(pet_id, player_id, start_time, duration_hrs) VALUES(?,?,?,?)",
                 (pet["id"], interaction.user.id, db.now_iso(), self.duration)
