@@ -928,7 +928,6 @@ class Armor(commands.Cog):
             "**💰 Sell Armor**\nSelect a piece to sell:",
             view=view, ephemeral=True
         )
-        )
 
     @app_commands.command(name="upgradearmor", description="Use armor pieces as fodder to upgrade another piece")
     async def upgradearmor(self, interaction: discord.Interaction):
