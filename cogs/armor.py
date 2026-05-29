@@ -115,7 +115,7 @@ def _build_armor_embed(armor_list: list[dict], page: int) -> tuple[discord.Embed
                 inline=False
             )
 
-    embed.set_footer(text=f"Page {page + 1}/{total_pages} · /equip to equip · /sellarmor <id> to sell")
+    embed.set_footer(text=f"Page {page + 1}/{total_pages} · /equip to equip · /sellarmor to sell")
     return embed, total_pages
 
 
@@ -690,6 +690,163 @@ class UpgradeArmorView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=None)
 
 
+# ── /sellarmor select view ────────────────────────────────────────────────────
+
+class SellArmorView(discord.ui.View):
+    """
+    If ≤ 25 pieces: show all in one select directly.
+    If > 25 pieces: rarity filter first, then filtered select.
+    Confirm step before actually selling.
+    """
+
+    def __init__(self, user_id: int, armor_list: list[dict], equipped_ids: set[int]):
+        super().__init__(timeout=60)
+        self.user_id = user_id
+        self.armor_list = armor_list
+        self.equipped_ids = equipped_ids
+        self.selected_id: int | None = None
+        self.selected_rarity: str | None = None
+        self._needs_filter = len(armor_list) > 25
+        if self._needs_filter:
+            self._phase1()
+        else:
+            self._build_select(armor_list, show_back=False)
+
+    # ── builders ─────────────────────────────────────────────────────────────
+
+    def _phase1(self):
+        self.clear_items()
+        present = {a["rarity"] for a in self.armor_list}
+        opts = []
+        for r in RARITY_ORDER:
+            if r in present:
+                count = sum(1 for a in self.armor_list if a["rarity"] == r)
+                price = armor_sell_price(r)
+                opts.append(discord.SelectOption(
+                    label=f"{r.title()} ({count}) — {price} coins each",
+                    value=r,
+                    emoji=RARITY_EMOJIS.get(r, "⚪")
+                ))
+        sel = discord.ui.Select(placeholder="Filter by rarity...", options=opts, row=0)
+        sel.callback = self._rarity_cb
+        self.add_item(sel)
+
+    def _build_select(self, pool: list[dict], show_back: bool = True):
+        self.clear_items()
+        armor_opts = []
+        for ar in pool[:25]:
+            r_emoji = RARITY_EMOJIS.get(ar["rarity"], "⚪")
+            lv = ar.get("armor_level") or 1
+            price = armor_sell_price(ar["rarity"])
+            is_eq = ar["id"] in self.equipped_ids
+            equip_tag = "✅ Equipped · " if is_eq else ""
+            desc = f"{equip_tag}{ar['rarity'].title()} Lv{lv} · {price} coins · {armor_bonus_line(ar)}"
+            armor_opts.append(discord.SelectOption(
+                label=ar["name"], value=str(ar["id"]),
+                description=desc[:100], emoji=r_emoji
+            ))
+        sel = discord.ui.Select(placeholder="Choose armor to sell...", options=armor_opts, row=0)
+        sel.callback = self._armor_cb
+        self.add_item(sel)
+
+        btn_row = 1
+        if show_back:
+            back = discord.ui.Button(label="◀ Back", style=discord.ButtonStyle.secondary, row=btn_row)
+            back.callback = self._back_cb
+            self.add_item(back)
+
+        sell_btn = discord.ui.Button(label="💰 Sell", style=discord.ButtonStyle.danger, row=btn_row)
+        sell_btn.callback = self._sell_cb
+        self.add_item(sell_btn)
+
+    # ── callbacks ─────────────────────────────────────────────────────────────
+
+    async def _rarity_cb(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your menu!", ephemeral=True)
+            return
+        self.selected_rarity = interaction.data["values"][0]
+        self.selected_id = None
+        pool = [a for a in self.armor_list if a["rarity"] == self.selected_rarity]
+        self._build_select(pool, show_back=True)
+        price = armor_sell_price(self.selected_rarity)
+        await interaction.response.edit_message(
+            content=f"**💰 Sell Armor** — {self.selected_rarity.title()} pieces ({price} coins each)\nChoose a piece to sell:",
+            view=self
+        )
+
+    async def _back_cb(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your menu!", ephemeral=True)
+            return
+        self.selected_id = None
+        self._phase1()
+        await interaction.response.edit_message(
+            content="**💰 Sell Armor**\nFilter by rarity:",
+            view=self
+        )
+
+    async def _armor_cb(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your menu!", ephemeral=True)
+            return
+        self.selected_id = int(interaction.data["values"][0])
+        await interaction.response.defer()
+
+    async def _sell_cb(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your menu!", ephemeral=True)
+            return
+        if not self.selected_id:
+            await interaction.response.send_message("Select a piece to sell first.", ephemeral=True)
+            return
+
+        ar = next((a for a in self.armor_list if a["id"] == self.selected_id), None)
+        if not ar:
+            await interaction.response.send_message("Armor not found.", ephemeral=True)
+            return
+
+        # Warn if equipped
+        if self.selected_id in self.equipped_ids:
+            await interaction.response.send_message(
+                "⚠️ That piece is currently **equipped**! Unequip it first with `/equip`, "
+                "or press **Sell** again to confirm selling it anyway.",
+                ephemeral=True
+            )
+            self.equipped_ids.discard(self.selected_id)  # allow second press to go through
+            return
+
+        self.stop()
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            # Live check — make sure it still exists
+            async with conn.execute(
+                "SELECT id FROM armor_inventory WHERE id=? AND player_id=?",
+                (self.selected_id, interaction.user.id)
+            ) as cur:
+                exists = await cur.fetchone()
+            if not exists:
+                await interaction.response.send_message(
+                    "That armor piece no longer exists in your collection.", ephemeral=True
+                )
+                return
+            price = armor_sell_price(ar["rarity"])
+            await db.unequip_armor_id(conn, self.selected_id, interaction.user.id)
+            await conn.execute("DELETE FROM armor_inventory WHERE id=?", (self.selected_id,))
+            await conn.execute(
+                "UPDATE players SET coins=coins+? WHERE user_id=?", (price, interaction.user.id)
+            )
+            await conn.commit()
+
+        r_emoji = RARITY_EMOJIS.get(ar["rarity"], "")
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                description=f"Sold {r_emoji} **{ar['name']}** for **{price:,} coins**! 💰",
+                color=0x2ECC71
+            ),
+            content=None, view=None
+        )
+
+
 # ── Cog ───────────────────────────────────────────────────────────────────────
 
 class Armor(commands.Cog):
@@ -749,34 +906,28 @@ class Armor(commands.Cog):
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @app_commands.command(name="sellarmor", description="Sell a piece of armor for coins")
-    @app_commands.describe(armor_id="The armor ID shown in /armor")
-    async def sellarmor(self, interaction: discord.Interaction, armor_id: int):
+    async def sellarmor(self, interaction: discord.Interaction):
         async with aiosqlite.connect(db.DB_PATH) as conn:
             async with conn.execute(
-                "SELECT * FROM armor_inventory WHERE id=? AND player_id=?",
-                (armor_id, interaction.user.id)
+                "SELECT * FROM armor_inventory WHERE player_id=? ORDER BY rarity DESC, name",
+                (interaction.user.id,)
             ) as cur:
                 cols = [d[0] for d in cur.description]
-                row = await cur.fetchone()
+                armor_list = [dict(zip(cols, r)) for r in await cur.fetchall()]
+            pets = await db.get_player_pets(conn, interaction.user.id)
 
-            if not row:
-                await interaction.response.send_message(
-                    "Armor not found in your collection.", ephemeral=True
-                )
-                return
-            ar = dict(zip(cols, row))
-
-            await db.unequip_armor_id(conn, armor_id, interaction.user.id)
-            await conn.execute("DELETE FROM armor_inventory WHERE id=?", (armor_id,))
-            price = armor_sell_price(ar["rarity"])
-            await conn.execute(
-                "UPDATE players SET coins=coins+? WHERE user_id=?", (price, interaction.user.id)
+        if not armor_list:
+            await interaction.response.send_message(
+                "You have no armor to sell.", ephemeral=True
             )
-            await conn.commit()
+            return
 
-        r_emoji = RARITY_EMOJIS.get(ar["rarity"], "")
+        equipped_ids = get_equipped_ids(pets)
+        view = SellArmorView(interaction.user.id, armor_list, equipped_ids)
         await interaction.response.send_message(
-            f"Sold {r_emoji} **{ar['name']}** for **{price} coins**! 💰"
+            "**💰 Sell Armor**\nSelect a piece to sell:",
+            view=view, ephemeral=True
+        )
         )
 
     @app_commands.command(name="upgradearmor", description="Use armor pieces as fodder to upgrade another piece")
